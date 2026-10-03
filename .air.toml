@@ -1,0 +1,15 @@
+root = "."
+tmp_dir = "tmp"
+
+# Rebuild the Go binary on backend changes and relaunch it. The frontend is
+# rebuilt by `pnpm -C web dev` (vite-plus) separately — watching TS files here
+# would only recompile an identical Go binary.
+[build]
+cmd = "CGO_ENABLED=1 go build -o ./tmp/duckscope ./cmd/duckscope"
+bin = "./tmp/duckscope"
+include_ext = ["go", "mod", "sum"]
+exclude_dir = ["tmp", "vendor", "bin", "data", "dist", "node_modules", "web"]
+delay = 200
+stop_on_error = true
+send_interrupt = true
+kill_delay = 5000

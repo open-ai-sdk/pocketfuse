@@ -1,0 +1,23 @@
+services:
+  duckscope:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # The process always listens on 3825 inside the container. The value of
+      # DUCKSCOPE_PORT controls the host port in the mapping below.
+      DUCKSCOPE_HOST: 0.0.0.0
+      DUCKSCOPE_PORT: 3825
+      DUCKSCOPE_DB_PATH: ${DUCKSCOPE_DB_PATH:-/data/duckscope.db}
+    ports:
+      - "${DUCKSCOPE_PORT:-3825}:3825"
+    volumes:
+      - "${DUCKSCOPE_DATA_DIR:-./data}:/data"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:3825/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+

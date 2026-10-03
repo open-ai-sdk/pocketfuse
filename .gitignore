@@ -1,0 +1,52 @@
+# Binaries and build output
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go tooling
+/vendor/
+cover.out
+coverage.out
+
+# DuckDB local databases and sidecar files
+*.db
+*.db.wal
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+/data/
+
+# Air live-reload scratch dir
+tmp/
+
+# Frontend dependencies and build output
+web/node_modules/
+web/dist/assets/
+web/.vite/
+.pnpm-store/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs and runtime files
+*.log
+*.pid
+*.pid.lock
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

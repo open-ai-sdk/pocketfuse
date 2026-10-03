@@ -1,0 +1,15 @@
+.git
+.github
+docs
+bin
+tmp
+data
+*.db
+*.db.wal
+.env
+.env.*
+
+# Keep web/dist (required by go:embed); drop everything else heavy.
+web/node_modules
+web/.vite
+node_modules

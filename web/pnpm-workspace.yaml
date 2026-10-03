@@ -1,0 +1,3 @@
+# vite-plus needs every plugin/tool to resolve the single vite-plus-core copy.
+overrides:
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0

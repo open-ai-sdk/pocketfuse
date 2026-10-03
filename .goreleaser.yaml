@@ -1,0 +1,46 @@
+version: 2
+
+project_name: duckscope
+
+before:
+  hooks:
+    - go mod tidy
+    # The Go server embeds web/dist via go:embed, so the SPA must be built
+    # before compiling. pnpm is provided by corepack (packageManager pin).
+    - pnpm --dir ./web install --frozen-lockfile
+    - pnpm --dir ./web run build
+
+builds:
+  - id: duckscope
+    main: ./cmd/duckscope
+    binary: duckscope
+    env:
+      # go-duckdb requires CGO; cross-compiling it is not practical, so the
+      # binary release targets linux/amd64 only. Other platforms use the
+      # Docker image (built multi-arch by the release workflow).
+      - CGO_ENABLED=1
+    ldflags:
+      - -s -w
+    flags:
+      - -trimpath
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: open-ai-sdk
+    name: duckscope
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
