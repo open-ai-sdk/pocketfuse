@@ -12,7 +12,7 @@ DUCKSCOPE_HOST ?= 127.0.0.1
 DUCKSCOPE_PORT ?= 3825
 
 .PHONY: frontend-install frontend-build build run dev test vet check \
-	docker-build docker-up docker-down clean
+	docker-build docker-up docker-down docs-dev docs-build clean
 
 frontend-install:
 	@if [ -f "$(FRONTEND_DIR)/pnpm-lock.yaml" ]; then \
@@ -51,6 +51,12 @@ docker-up: frontend-build
 
 docker-down:
 	$(DOCKER) compose down
+
+docs-dev:
+	@cd docs && $(PNPM) install && $(PNPM) run dev
+
+docs-build:
+	@cd docs && $(PNPM) install --frozen-lockfile && $(PNPM) run build
 
 clean:
 	rm -rf "$(BIN_DIR)"

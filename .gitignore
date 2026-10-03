@@ -28,8 +28,13 @@ tmp/
 
 # Frontend dependencies and build output
 web/node_modules/
-web/src/routeTree.gen.ts
 web/dist/assets/
+
+# Docs dependencies and build output
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
 web/.vite/
 .pnpm-store/
 

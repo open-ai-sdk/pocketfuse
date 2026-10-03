@@ -186,3 +186,9 @@ make docker-build
 
 The test suite is intentionally local and deterministic. No external services
 are required.
+
+## Documentation
+
+The full docs site lives in `docs/` (VitePress) and is published to GitHub
+Pages on every push to `main` that touches `docs/**`:
+<https://open-ai-sdk.github.io/duckscope/>. Local preview: `make docs-dev`.
