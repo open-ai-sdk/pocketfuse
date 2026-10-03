@@ -147,6 +147,8 @@
   --color-content-success: var(--content-success);
   --color-content-warning: var(--content-warning);
   --color-content-danger: var(--content-danger);
+  --color-content-error: var(--content-error);
+  --color-content-accent: var(--content-accent);
   --color-content-inverse-primary: var(--content-inverse-primary);
   --color-content-inverse-secondary: var(--content-inverse-secondary);
 
