@@ -1,5 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { TraceDetailPage } from '../../pages/trace-detail-page'
+import { RouteError, TraceDetailSkeleton } from '../../pages/route-skeletons'
+import { traceOptions, traceScoresOptions } from '../../lib/queries'
 
 // `?obs=<id>` deep-links a specific observation; `?view=` and `?tab=`
 // deep-link the left-panel view (tree/timeline/graph) and the right-panel
@@ -19,5 +21,12 @@ export const Route = createFileRoute('/traces/$traceId')({
         ? search.tab
         : undefined,
   }),
+  loader: ({ context, params }) =>
+    Promise.all([
+      context.queryClient.ensureQueryData(traceOptions(params.traceId)),
+      context.queryClient.ensureQueryData(traceScoresOptions(params.traceId)),
+    ]).then(() => undefined),
+  pendingComponent: TraceDetailSkeleton,
+  errorComponent: RouteError,
   component: TraceDetailPage,
 })

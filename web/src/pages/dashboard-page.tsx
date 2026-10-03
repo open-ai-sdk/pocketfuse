@@ -30,7 +30,7 @@ export function DashboardPage() {
     : 0
 
   return (
-    <div className='min-h-full bg-background-primary text-content-primary'>
+    <div className='min-h-full text-content-primary'>
       <PageHeader
         eyebrow='Workspace'
         title='Overview'

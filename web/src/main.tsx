@@ -9,13 +9,23 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5_000,
-      refetchOnWindowFocus: false,
+      // Re-focusing the tab refetches stale queries — "fresh on return"
+      // without background polling.
+      refetchOnWindowFocus: true,
       retry: 1,
     },
   },
 })
 
-const router = createRouter({ routeTree, defaultPreload: 'intent' })
+const router = createRouter({
+  routeTree,
+  context: { queryClient },
+  defaultPreload: 'intent',
+  // Skeletons only when a loader is genuinely slow — the local API usually
+  // resolves far below this, so fast navigations never flash a skeleton.
+  defaultPendingMs: 250,
+  defaultPendingMinMs: 300,
+})
 
 declare module '@tanstack/react-router' {
   interface Register {

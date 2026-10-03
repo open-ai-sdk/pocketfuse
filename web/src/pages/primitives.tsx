@@ -25,7 +25,7 @@ export function PageHeader({
   eyebrow?: string
 }) {
   return (
-    <header className='flex flex-col gap-3 border-b border-border-primary bg-background-primary px-4 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6'>
+    <header className='flex flex-col gap-3 border-b border-border-primary px-4 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6'>
       <div className='min-w-0'>
         <div className='flex flex-wrap items-center gap-2'>
           {eyebrow && (
@@ -113,7 +113,10 @@ export function Panel({
   className?: string
 }) {
   return (
-    <Card className={cn(panelSurface, className)}>
+    // Panel owns its layout: the stock Card ships py-4 + gap-4 which stack
+    // with the full-bleed bordered header and body rows (28px above the
+    // title, a 16px gap under the header border) — zero them out here.
+    <Card className={cn(panelSurface, 'gap-0 py-0', className)}>
       {(title || description || action) && (
         <CardHeader className='flex flex-row items-start justify-between gap-3 border-b border-border-primary px-4 py-3'>
           <div className='min-w-0'>
