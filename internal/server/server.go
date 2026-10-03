@@ -79,10 +79,33 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.FileServer(h.assets).ServeHTTP(w, r)
 		return
 	}
-	// Vite's client router needs index.html for deep links.
-	r2 := r.Clone(r.Context())
-	r2.URL.Path = "/index.html"
-	http.FileServer(h.assets).ServeHTTP(w, r2)
+	// Real file misses under /assets/ are genuine 404s (stale hash, missing
+	// chunk) — returning index.html here breaks module loading with a MIME
+	// mismatch, which is far harder to diagnose.
+	if strings.HasPrefix(path, "assets/") {
+		http.NotFound(w, r)
+		return
+	}
+	// Vite's client router needs index.html for deep links. Serve it
+	// directly — FileServer would 301 /index.html → ./ and break the link.
+	index, err := h.assets.Open("index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = index.Close() }()
+	stat, err := index.Stat()
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	reader, ok := index.(io.ReadSeeker)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	http.ServeContent(w, r, "index.html", stat.ModTime(), reader)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

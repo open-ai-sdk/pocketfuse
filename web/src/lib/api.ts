@@ -17,11 +17,12 @@ export type Trace = {
   input?: unknown
   output?: unknown
   metadata?: Record<string, unknown>
-  tags?: string[]
+  environment?: string
   observations?: Observation[]
   observationCount?: number
   totalCost?: number
   totalTokens?: number
+  tags?: string[]
 }
 
 export type Observation = {
@@ -37,6 +38,7 @@ export type Observation = {
   input?: unknown
   output?: unknown
   metadata?: Record<string, unknown>
+  usage?: Record<string, unknown>
   model?: string
   modelParameters?: Record<string, unknown>
   promptTokens?: number
@@ -54,9 +56,25 @@ export type Paginated<T> = {
   limit: number
 }
 
+export type Score = {
+  id: string
+  traceId?: string
+  observationId?: string
+  name?: string
+  value?: number
+  stringValue?: string
+  dataType?: string
+  source?: string
+  comment?: string
+  timestamp?: string
+}
+
 export type TraceFilters = {
   project?: string
   name?: string
+  traceId?: string
+  observationId?: string
+  type?: string
   from?: string
   to?: string
   page?: number
@@ -109,8 +127,8 @@ function normalizeObservation(raw: unknown): Observation {
     input: item.input,
     output: item.output,
     metadata: asRecord(item.metadata),
+    usage: asRecord(item.usage ?? item.usageDetails ?? item.usage_details),
     model: stringValue(item, 'model', 'modelName'),
-    modelParameters: asRecord(item.modelParameters),
     promptTokens: numberValue(item, 'promptTokens', 'prompt_tokens'),
     completionTokens: numberValue(item, 'completionTokens', 'completion_tokens'),
     totalTokens: numberValue(item, 'totalTokens', 'total_tokens'),
@@ -151,6 +169,7 @@ function normalizeTrace(raw: unknown): Trace {
     tags: Array.isArray(item.tags)
       ? item.tags.filter((tag): tag is string => typeof tag === 'string')
       : undefined,
+    environment: stringValue(item, 'environment', 'env'),
     observations,
     observationCount:
       numberValue(item, 'observationCount', 'observation_count') ?? observations?.length,
@@ -246,6 +265,28 @@ export async function getSessions(): Promise<Paginated<Record<string, unknown>>>
   return request<Paginated<Record<string, unknown>>>('/api/sessions')
 }
 
-export async function getScores(): Promise<Paginated<Record<string, unknown>>> {
-  return request<Paginated<Record<string, unknown>>>('/api/scores')
+export async function getScores(filters: TraceFilters = {}): Promise<Paginated<Score>> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  const query = params.toString()
+  const payload = await request<unknown>(`/api/scores${query ? `?${query}` : ''}`)
+  return normalizePage(payload, normalizeScore, filters.page ?? 1, filters.limit ?? 25)
+}
+
+function normalizeScore(raw: unknown): Score {
+  const item = asRecord(raw)
+  return {
+    id: stringValue(item, 'id', 'scoreId') ?? crypto.randomUUID(),
+    traceId: stringValue(item, 'traceId', 'trace_id'),
+    observationId: stringValue(item, 'observationId', 'observation_id'),
+    name: stringValue(item, 'name', 'scoreName'),
+    value: numberValue(item, 'value'),
+    stringValue: stringValue(item, 'stringValue', 'string_value'),
+    dataType: stringValue(item, 'dataType', 'data_type'),
+    source: stringValue(item, 'source'),
+    comment: stringValue(item, 'comment'),
+    timestamp: stringValue(item, 'timestamp', 'createdAt', 'created_at'),
+  }
 }

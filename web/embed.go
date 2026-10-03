@@ -10,5 +10,5 @@ import "embed"
 
 // Dist contains the static frontend build.
 //
-//go:embed dist
+//go:embed all:dist
 var Dist embed.FS
