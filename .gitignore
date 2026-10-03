@@ -30,7 +30,7 @@ tmp/
 
 # Frontend dependencies and build output
 web/node_modules/
-web/dist/assets/
+web/dist/
 
 # Docs dependencies and build output
 docs/node_modules/
