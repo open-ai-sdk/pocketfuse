@@ -1,28 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useNavigate, useSearch } from '@tanstack/react-router'
 import {
-  Activity,
   AlertCircle,
   ArrowLeft,
   Bot,
   ChevronDown,
   ChevronRight,
-  CircleDot,
   Clock3,
   Database,
   Download,
-  FileText,
   GitBranch,
   Hash,
   Layers,
   ListTree,
   MessageSquare,
   RefreshCw,
-  Rows3,
-  Sparkles,
   Star,
   UserRound,
-  Wrench,
 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { getScores, getTrace, type Observation, type Score, type Trace } from '../lib/api'
@@ -47,6 +41,12 @@ import {
   prettyJson,
 } from '../lib/utils'
 import { IOPreview } from '../components/io-preview'
+import { kindFor, toneChipClass } from '../components/trace/kinds'
+import { SegmentedControl, TabBar, type TabBarTab } from '../components/trace/segmented'
+import { TimelineView } from '../components/trace/timeline-view'
+import { GraphView } from '../components/trace/graph-view'
+import { TraceLogView } from '../components/trace/log-view'
+import { ScoreRows } from '../components/trace/score-rows'
 import {
   Alert,
   AlertAction,
@@ -54,39 +54,16 @@ import {
   AlertTitle,
   Badge,
   Button,
-  Card,
-  CardContent,
-  EmptyState,
   Input,
   Separator,
   Skeleton,
 } from '../components/ui'
 import { MetricCell, MetricStrip, StatusChip, panelSurface } from './primitives'
 
-// Observation type → label/icon/tone map.
-const KIND_BY_TYPE: Record<
-  string,
-  { label: string; icon: typeof Sparkles; tone: 'violet' | 'blue' | 'amber' | 'green' | 'neutral' }
-> = {
-  GENERATION: { label: 'Generation', icon: Sparkles, tone: 'violet' },
-  SPAN: { label: 'Span', icon: GitBranch, tone: 'blue' },
-  EVENT: { label: 'Event', icon: CircleDot, tone: 'green' },
-  AGENT: { label: 'Agent', icon: Bot, tone: 'violet' },
-  TOOL: { label: 'Tool', icon: Wrench, tone: 'amber' },
-  CHAIN: { label: 'Chain', icon: Layers, tone: 'blue' },
-  RETRIEVER: { label: 'Retriever', icon: Database, tone: 'blue' },
-  EMBEDDING: { label: 'Embedding', icon: Rows3, tone: 'neutral' },
-}
-
-function kindFor(type?: string) {
-  return (
-    KIND_BY_TYPE[type?.toUpperCase() ?? ''] ?? {
-      label: type || 'Observation',
-      icon: Wrench,
-      tone: 'neutral' as const,
-    }
-  )
-}
+// Left-panel view modes for exploring a trace's structure.
+type ViewMode = 'tree' | 'timeline' | 'graph'
+// Right-panel detail sections, shared by the trace root and observations.
+type DetailTab = 'preview' | 'attributes' | 'scores' | 'log'
 
 // Score chips grouped by name.
 function ScoreBadges({ scores, className }: { scores: Score[]; className?: string }) {
@@ -207,13 +184,7 @@ function TreeRow({
       <span
         className={cn(
           'my-1 flex size-5 shrink-0 items-center justify-center rounded-[3px] border',
-          kind.tone === 'violet' && 'border-border-secondary bg-surface-accent text-content-accent',
-          kind.tone === 'blue' &&
-            'border-border-information bg-surface-information text-content-information',
-          kind.tone === 'green' && 'border-border-success bg-surface-success text-content-success',
-          kind.tone === 'amber' && 'border-border-warning bg-surface-warning text-content-warning',
-          kind.tone === 'neutral' &&
-            'border-border-primary bg-surface-tertiary text-content-secondary',
+          toneChipClass[kind.tone],
         )}
       >
         <Icon className='size-3' />
@@ -245,10 +216,10 @@ function TreeRow({
             className={cn(
               'absolute inset-y-0 rounded-full',
               observation.level?.toUpperCase() === 'ERROR'
-                ? 'bg-action-error'
+                ? 'bg-action-danger'
                 : pending
                   ? 'animate-pulse bg-action-warning'
-                  : 'bg-action-brand',
+                  : 'bg-interactive-primary',
             )}
             style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
           />
@@ -346,7 +317,7 @@ function TraceNav({
     )
 
   return (
-    <div className='flex min-h-0 flex-col'>
+    <div className='flex min-h-0 flex-1 flex-col'>
       <div className='flex items-center gap-1.5 border-b border-border-primary px-2.5 py-2'>
         <Input
           value={query}
@@ -401,7 +372,7 @@ function TraceNav({
             className={cn(
               'rounded-[3px] border px-1.5 py-0.5 font-mono text-[9.5px] uppercase',
               errorsOnly
-                ? 'border-border-error bg-surface-error text-content-error'
+                ? 'border-border-danger bg-surface-error text-content-error'
                 : 'border-border-primary text-content-tertiary hover:text-content-secondary',
             )}
           >
@@ -482,15 +453,51 @@ function TraceNav({
   )
 }
 
-// Right panel when the TRACE root is selected.
+// Detail section shared by both detail views: chronological log of every
+// observation in the trace.
+function LogTab({
+  observations,
+  originMs,
+  selectedId,
+  onSelect,
+}: {
+  observations: Observation[]
+  originMs: number
+  selectedId: string
+  onSelect: (id: string) => void
+}) {
+  return (
+    <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
+      <TraceLogView
+        observations={observations}
+        originMs={originMs}
+        selectedId={selectedId}
+        onSelect={onSelect}
+      />
+    </div>
+  )
+}
+
+// Right panel when the TRACE root is selected. Header card stays above the
+// tabs; the tab body switches between preview / attributes / scores / log.
 function TraceDetailView({
   trace,
   scores,
+  tab,
+  observations,
+  originMs,
+  selectedId,
+  onSelect,
   totalTokens,
   durationMs,
 }: {
   trace: Trace
   scores: Score[]
+  tab: DetailTab
+  observations: Observation[]
+  originMs: number
+  selectedId: string
+  onSelect: (id: string) => void
   totalTokens?: number
   durationMs?: number
 }) {
@@ -533,53 +540,112 @@ function TraceDetailView({
           </div>
         )}
       </div>
-      <div className='grid gap-3 lg:grid-cols-2'>
-        <IOPreview label='Input' value={trace.input} />
-        <IOPreview label='Output' value={trace.output} />
-      </div>
-      <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
-        <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
-          Details
-        </h4>
-        <dl className='grid gap-x-6 gap-y-2 sm:grid-cols-2'>
-          {detailRows.map(({ label, value, icon: Icon }) => (
-            <div key={label} className='flex items-start gap-2'>
-              <Icon className='mt-0.5 size-3.5 shrink-0 text-content-secondary' />
-              <div className='min-w-0'>
-                <dt className='font-mono text-[9.5px] uppercase tracking-[0.08em] text-content-tertiary'>
-                  {label}
-                </dt>
-                <dd className='truncate text-xs text-content-primary'>{value || '—'}</dd>
+      {tab === 'preview' && (
+        <div className='grid gap-3 lg:grid-cols-2'>
+          <IOPreview label='Input' value={trace.input} />
+          <IOPreview label='Output' value={trace.output} />
+        </div>
+      )}
+      {tab === 'attributes' && (
+        <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
+          <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+            Details
+          </h4>
+          <dl className='grid gap-x-6 gap-y-2 sm:grid-cols-2'>
+            {detailRows.map(({ label, value, icon: Icon }) => (
+              <div key={label} className='flex items-start gap-2'>
+                <Icon className='mt-0.5 size-3.5 shrink-0 text-content-secondary' />
+                <div className='min-w-0'>
+                  <dt className='font-mono text-[9.5px] uppercase tracking-[0.08em] text-content-tertiary'>
+                    {label}
+                  </dt>
+                  <dd className='truncate text-xs text-content-primary'>{value || '—'}</dd>
+                </div>
               </div>
-            </div>
-          ))}
-        </dl>
-        {trace.metadata && Object.keys(trace.metadata).length > 0 && (
-          <pre className='mt-3 max-h-48 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
-            {prettyJson(trace.metadata)}
-          </pre>
-        )}
-      </div>
+            ))}
+          </dl>
+          {trace.metadata && Object.keys(trace.metadata).length > 0 && (
+            <pre className='mt-3 max-h-48 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
+              {prettyJson(trace.metadata)}
+            </pre>
+          )}
+        </div>
+      )}
+      {tab === 'scores' && (
+        <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
+          <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+            Scores
+          </h4>
+          <ScoreRows scores={scores} emptyHint='No scores on this trace.' />
+        </div>
+      )}
+      {tab === 'log' && (
+        <LogTab
+          observations={observations}
+          originMs={originMs}
+          selectedId={selectedId}
+          onSelect={onSelect}
+        />
+      )}
     </div>
   )
 }
 
-// Right panel when an observation is selected.
-// Badge header + preview + attributes.
+// Right panel when an observation is selected: header card (type, timing,
+// model, status) above the shared tab body.
 function ObservationDetailView({
   observation,
   scores,
+  tab,
+  observations,
+  originMs,
+  selectedId,
+  onSelect,
 }: {
   observation: Observation
   scores: Score[]
+  tab: DetailTab
+  observations: Observation[]
+  originMs: number
+  selectedId: string
+  onSelect: (id: string) => void
 }) {
   const kind = kindFor(observation.type)
   const Icon = kind.icon
   const tokens = observationTokens(observation)
-  const ownScores = scores.filter((s) => s.observationId === observation.id)
+  const pending = observationIsPending(observation)
   const hasParams =
     observation.modelParameters && Object.keys(observation.modelParameters).length > 0
   const hasMetadata = observation.metadata && Object.keys(observation.metadata).length > 0
+  const detailRows: { label: string; value: string; mono?: boolean }[] = [
+    { label: 'Trace', value: observation.traceId || '—', mono: true },
+    { label: 'Parent', value: observation.parentObservationId || '—', mono: true },
+    { label: 'Type', value: kind.label },
+    { label: 'Level', value: observation.level || 'DEFAULT' },
+    {
+      label: 'Started',
+      value: formatDate(observation.startTime ?? observation.timestamp),
+    },
+    {
+      label: 'Ended',
+      value: observation.endTime ? formatDate(observation.endTime) : pending ? 'running' : '—',
+    },
+    {
+      label: 'Duration',
+      value: pending
+        ? 'running'
+        : formatDuration(observation.duration ?? observationDurationMs(observation)),
+    },
+    { label: 'Model', value: observation.model || '—' },
+    {
+      label: 'Usage',
+      value:
+        tokens.total !== undefined
+          ? `${formatTokens(tokens.input ?? 0)} in · ${formatTokens(tokens.output ?? 0)} out · ${formatTokens(tokens.total)} total`
+          : '—',
+    },
+    { label: 'Cost', value: observation.cost !== undefined ? formatCost(observation.cost) : '—' },
+  ]
 
   return (
     <div className='flex flex-col gap-3'>
@@ -588,16 +654,7 @@ function ObservationDetailView({
           <span
             className={cn(
               'flex size-6 items-center justify-center rounded-[3px] border',
-              kind.tone === 'violet' &&
-                'border-border-secondary bg-surface-accent text-content-accent',
-              kind.tone === 'blue' &&
-                'border-border-information bg-surface-information text-content-information',
-              kind.tone === 'green' &&
-                'border-border-success bg-surface-success text-content-success',
-              kind.tone === 'amber' &&
-                'border-border-warning bg-surface-warning text-content-warning',
-              kind.tone === 'neutral' &&
-                'border-border-primary bg-surface-tertiary text-content-secondary',
+              toneChipClass[kind.tone],
             )}
           >
             <Icon className='size-3.5' />
@@ -616,13 +673,15 @@ function ObservationDetailView({
               {observation.level}
             </Badge>
           )}
-          <ScoreBadges scores={ownScores} />
+          <ScoreBadges scores={scores} />
         </div>
         <div className='mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-content-secondary'>
           <span className='font-mono text-content-tertiary'>{observation.id}</span>
           <span>{formatDate(observation.startTime ?? observation.timestamp)}</span>
           <span className='font-mono'>
-            {formatDuration(observation.duration ?? observationDurationMs(observation))}
+            {pending
+              ? 'running'
+              : formatDuration(observation.duration ?? observationDurationMs(observation))}
           </span>
           {tokens.total !== undefined && (
             <span title={`input ${tokens.input ?? '—'} · output ${tokens.output ?? '—'}`}>
@@ -638,36 +697,81 @@ function ObservationDetailView({
           )}
         </div>
         {observation.statusMessage && (
-          <p className='mt-2 rounded-[3px] border border-border-error bg-surface-error px-2.5 py-1.5 text-[11px] text-content-error'>
+          <p className='mt-2 rounded-[3px] border border-border-danger bg-surface-error px-2.5 py-1.5 text-[11px] text-content-error'>
             {observation.statusMessage}
           </p>
         )}
       </div>
-      <div className='grid gap-3 lg:grid-cols-2'>
-        <IOPreview label='Input' value={observation.input} />
-        <IOPreview label='Output' value={observation.output} />
-      </div>
-      {(hasParams || hasMetadata) && (
+      {tab === 'preview' && (
+        <div className='grid gap-3 lg:grid-cols-2'>
+          <IOPreview label='Input' value={observation.input} />
+          <IOPreview label='Output' value={observation.output} />
+        </div>
+      )}
+      {tab === 'attributes' && (
         <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
-          <h4 className='mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
-            Attributes
+          <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+            Details
           </h4>
-          {hasParams && (
-            <pre className='max-h-40 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
-              {prettyJson(observation.modelParameters)}
-            </pre>
-          )}
-          {hasMetadata && (
-            <pre
-              className={cn(
-                'max-h-40 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary',
-                hasParams && 'mt-2',
+          <dl className='grid gap-x-6 gap-y-2 sm:grid-cols-2'>
+            {detailRows.map(({ label, value, mono }) => (
+              <div key={label} className='min-w-0'>
+                <dt className='font-mono text-[9.5px] uppercase tracking-[0.08em] text-content-tertiary'>
+                  {label}
+                </dt>
+                <dd
+                  className={cn(
+                    'truncate text-xs text-content-primary',
+                    mono && 'font-mono text-[11px]',
+                  )}
+                  title={value}
+                >
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          {(hasParams || hasMetadata) && (
+            <div className='mt-3 flex flex-col gap-2'>
+              {hasParams && (
+                <div>
+                  <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+                    Model parameters
+                  </h4>
+                  <pre className='max-h-40 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
+                    {prettyJson(observation.modelParameters)}
+                  </pre>
+                </div>
               )}
-            >
-              {prettyJson(observation.metadata)}
-            </pre>
+              {hasMetadata && (
+                <div>
+                  <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+                    Metadata
+                  </h4>
+                  <pre className='max-h-40 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
+                    {prettyJson(observation.metadata)}
+                  </pre>
+                </div>
+              )}
+            </div>
           )}
         </div>
+      )}
+      {tab === 'scores' && (
+        <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
+          <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+            Scores
+          </h4>
+          <ScoreRows scores={scores} emptyHint='No scores on this observation.' />
+        </div>
+      )}
+      {tab === 'log' && (
+        <LogTab
+          observations={observations}
+          originMs={originMs}
+          selectedId={selectedId}
+          onSelect={onSelect}
+        />
       )}
     </div>
   )
@@ -675,20 +779,39 @@ function ObservationDetailView({
 
 export function TraceDetailPage() {
   const { traceId } = useParams({ from: '/traces/$traceId' })
-  const { obs } = useSearch({ from: '/traces/$traceId' })
+  const { obs, view: viewParam, tab: tabParam } = useSearch({ from: '/traces/$traceId' })
   const navigate = useNavigate()
-  // `?obs=` is the single source of truth for selection (per-event
-  // deep-link). Params are passed explicitly — without them the
-  // navigate to /traces/undefined on leave or on a bare `search` update.
+  // URL is the single source of truth for selection (`?obs=`), view
+  // (`?view=tree|timeline|graph`) and detail tab (`?tab=`) — per-view
+  // deep links survive reloads and can be shared. Params are passed
+  // explicitly; without them a search update navigates to
+  // /traces/undefined.
+  const view: ViewMode = viewParam ?? 'tree'
+  const tab: DetailTab = tabParam ?? 'preview'
   const selectedId = obs ?? 'trace'
-  const setSelectedId = (id: string) => {
+  const patchSearch = (patch: { obs?: string | null; view?: ViewMode; tab?: DetailTab }) => {
     void navigate({
       to: '/traces/$traceId',
       params: { traceId },
-      search: id === 'trace' ? {} : { obs: id },
+      search: {
+        obs: 'obs' in patch ? patch.obs || undefined : (obs ?? undefined),
+        view:
+          'view' in patch
+            ? patch.view === 'tree'
+              ? undefined
+              : patch.view
+            : (viewParam ?? undefined),
+        tab:
+          'tab' in patch
+            ? patch.tab === 'preview'
+              ? undefined
+              : patch.tab
+            : (tabParam ?? undefined),
+      },
       replace: true,
     })
   }
+  const setSelectedId = (id: string) => patchSearch({ obs: id })
   const traceQuery = useQuery({
     queryKey: ['trace', traceId],
     queryFn: () => getTrace(traceId),
@@ -732,6 +855,23 @@ export function TraceDetailPage() {
   // observation window.
   const traceDurationMs =
     trace?.duration ?? trace?.latency ?? timeWindow.endMs - timeWindow.originMs
+
+  // A single observation has nothing to relate — the graph needs ≥2 nodes.
+  const graphDisabled = observations.length < 2
+  const activeView: ViewMode = view === 'graph' && graphDisabled ? 'tree' : view
+  const detailScores = useMemo(
+    () =>
+      selected
+        ? scores.filter((s) => s.observationId === selected.id)
+        : scores.filter((s) => !s.observationId),
+    [scores, selected],
+  )
+  const tabs: TabBarTab<DetailTab>[] = [
+    { id: 'preview', label: 'Preview' },
+    { id: 'attributes', label: 'Attributes' },
+    { id: 'scores', label: 'Scores', count: detailScores.length },
+    { id: 'log', label: 'Log view', count: observations.length },
+  ]
 
   const exportTrace = () => {
     if (!trace) return
@@ -828,44 +968,78 @@ export function TraceDetailPage() {
       {/* ── two-pane workspace ── */}
       {trace && (
         <div className='grid min-h-0 flex-1 gap-0 xl:grid-cols-[380px_minmax(0,1fr)]'>
-          <aside className='min-h-[320px] border-b border-border-primary bg-surface-primary xl:border-b-0 xl:border-r'>
-            <TraceNav
-              trace={trace}
-              roots={roots}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              timeWindow={timeWindow}
-              durationMs={traceDurationMs}
-            />
-          </aside>
-          <main className='min-w-0 px-4 py-4 sm:px-5'>
-            {observations.length === 0 && selectedId === 'trace' ? (
-              <Card className={cn(panelSurface, 'p-0')}>
-                <CardContent className='p-0'>
-                  <EmptyState
-                    icon={<Activity className='size-4' />}
-                    title='No observations'
-                    description='This trace has been created, but no observations are attached yet.'
-                  />
-                </CardContent>
-              </Card>
-            ) : selected ? (
-              <ObservationDetailView observation={selected} scores={scores} />
-            ) : (
-              <TraceDetailView
+          <aside className='flex min-h-[320px] flex-col border-b border-border-primary bg-surface-primary xl:border-b-0 xl:border-r'>
+            <div className='border-b border-border-primary px-2.5 py-2'>
+              <SegmentedControl
+                ariaLabel='Trace view'
+                value={activeView}
+                onChange={(next) => patchSearch({ view: next })}
+                options={[
+                  { value: 'tree', label: 'Tree' },
+                  { value: 'timeline', label: 'Timeline' },
+                  {
+                    value: 'graph',
+                    label: 'Graph',
+                    disabled: graphDisabled,
+                    title: 'Nothing to graph — this trace has a single node',
+                  },
+                ]}
+              />
+            </div>
+            {activeView === 'tree' && (
+              <TraceNav
                 trace={trace}
-                scores={scores}
-                totalTokens={totalTokens}
+                roots={roots}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                timeWindow={timeWindow}
                 durationMs={traceDurationMs}
               />
             )}
-            {observations.length > 0 && (
-              <p className='mt-4 flex items-center gap-1.5 text-[10px] text-content-tertiary'>
-                <FileText className='size-3' />
-                {observations.length} observation{observations.length === 1 ? '' : 's'} · select a
-                node to inspect its input/output
-              </p>
+            {activeView === 'timeline' && (
+              <TimelineView
+                roots={roots}
+                timeWindow={timeWindow}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
             )}
+            {activeView === 'graph' && (
+              <GraphView roots={roots} selectedId={selectedId} onSelect={setSelectedId} />
+            )}
+          </aside>
+          <main className='flex min-w-0 flex-col'>
+            <TabBar
+              ariaLabel='Detail sections'
+              tabs={tabs}
+              active={tab}
+              onChange={(next) => patchSearch({ tab: next })}
+            />
+            <div className='min-h-0 flex-1 px-4 py-4 sm:px-5'>
+              {selected ? (
+                <ObservationDetailView
+                  observation={selected}
+                  scores={detailScores}
+                  tab={tab}
+                  observations={observations}
+                  originMs={timeWindow.originMs}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                />
+              ) : (
+                <TraceDetailView
+                  trace={trace}
+                  scores={detailScores}
+                  tab={tab}
+                  observations={observations}
+                  originMs={timeWindow.originMs}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  totalTokens={totalTokens}
+                  durationMs={traceDurationMs}
+                />
+              )}
+            </div>
           </main>
         </div>
       )}

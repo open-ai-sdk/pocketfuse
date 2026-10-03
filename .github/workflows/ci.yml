@@ -32,6 +32,12 @@ jobs:
           go-version-file: "./go.mod"
           cache-dependency-path: "./go.sum"
 
+      - name: Stub embedded frontend
+        # go:embed needs web/dist to exist; lint only typechecks its contents.
+        run: |
+          mkdir -p web/dist
+          printf '<!doctype html><title>ci stub</title>' > web/dist/index.html
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

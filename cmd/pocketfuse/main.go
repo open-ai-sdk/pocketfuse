@@ -23,13 +23,6 @@ func main() {
 				log.Fatalf("create database directory: %v", err)
 			}
 		}
-		// duckscope.db is the DuckDB-format file written by the previous
-		// release; it is not readable by the SQLite engine. Warn so an old
-		// file is not silently mistaken for a migrated one.
-		if _, err := os.Stat(filepath.Join(filepath.Dir(dbPath), "duckscope.db")); err == nil {
-			log.Print("note: found duckscope.db — that file uses the old DuckDB format and is ignored. " +
-				"Export its data from the old binary via GET /api/traces etc., then re-ingest via POST /api/ingest.")
-		}
 	}
 	ctx := context.Background()
 	db, err := store.Open(ctx, dbPath)
