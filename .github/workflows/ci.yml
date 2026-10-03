@@ -89,6 +89,8 @@ jobs:
         uses: voidzero-dev/setup-vp@v1.21.1
         with:
           node-version: "24"
+          working-directory: web
+          run-install: false
           cache: true
 
       - name: Install dependencies
@@ -120,6 +122,8 @@ jobs:
         uses: voidzero-dev/setup-vp@v1.21.1
         with:
           node-version: "24"
+          working-directory: web
+          run-install: false
           cache: true
 
       - name: Run GoReleaser (snapshot)

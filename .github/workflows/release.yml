@@ -24,10 +24,16 @@ jobs:
           go-version-file: "./go.mod"
           cache-dependency-path: "./go.sum"
 
+      # working-directory + run-install:false keep setup-vp from running
+      # `vp install` at the repo root (it creates a root package.json /
+      # lockfile / node_modules and fails goreleaser's dirty-git check —
+      # the before-hooks install inside web/ themselves).
       - name: Setup Vite+ toolchain
         uses: voidzero-dev/setup-vp@v1.21.1
         with:
           node-version: "24"
+          working-directory: web
+          run-install: false
           cache: true
 
       # dockers_v2 builds linux/amd64 + linux/arm64 manifests in one
