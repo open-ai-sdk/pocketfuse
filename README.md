@@ -65,35 +65,45 @@ POCKETFUSE_PORT=7625 \
 ./bin/pocketfuse
 ```
 
-## Docker Compose
+## Docker & Compose
 
-The Dockerfile packages artifacts only — build the frontend first
-(`pnpm --dir web run build` or `make docker-build`, which does both). The
-resulting image contains one executable; the host data directory is
-bind-mounted so removing the container does not remove the SQLite file.
+The quickest path runs the published image from GHCR — Compose pulls
+`ghcr.io/open-ai-sdk/pocketfuse:latest` (multi-arch: amd64 + arm64) and wires
+the port, data volume, and healthcheck:
 
 ```sh
 mkdir -p data
-make docker-up        # builds web/dist first, then docker compose up --build
+docker compose up -d        # pull + run; http://127.0.0.1:7625
+docker compose down         # stop; data remains in ./data
 ```
 
-Open <http://127.0.0.1:7625>. Stop it with `Ctrl-C`; use `docker compose down`
-to remove the container. Data remains in `./data`.
-
-To use another host port or data directory:
+Plain `docker run` works too:
 
 ```sh
-POCKETFUSE_PORT=9090 POCKETFUSE_DATA_DIR="$PWD/.pocketfuse-data" \
-  make docker-up
+docker run -d --name pocketfuse -p 7625:7625 -v "$PWD/data:/data" \
+  ghcr.io/open-ai-sdk/pocketfuse:latest
 ```
 
-`POCKETFUSE_PORT` is the host port in Compose. The process listens on port 7625
-inside the container. `POCKETFUSE_DB_PATH` must point to a path visible inside
-the container, normally `/data/pocketfuse.db`.
+Pin a version or change the host port / data directory with env vars:
 
-On Linux, the image runs as the unprivileged `pocketfuse` user. If a bind mount
-was created with restrictive ownership, make the directory writable by the
-container user before starting it:
+```sh
+POCKETFUSE_IMAGE=ghcr.io/open-ai-sdk/pocketfuse:1.2.3 \
+POCKETFUSE_PORT=9090 POCKETFUSE_DATA_DIR="$PWD/.pocketfuse-data" \
+  docker compose up -d
+```
+
+`POCKETFUSE_PORT` is the host port; the process always listens on 7625 inside
+the container, and `POCKETFUSE_DB_PATH` must resolve inside the container
+(normally `/data/pocketfuse.db`).
+
+**Development build**: the Dockerfile packages prebuilt artifacts only —
+`make docker-build` stages a context (`build/docker/`, GoReleaser's
+`linux/<arch>/pocketfuse` layout) and builds `pocketfuse:local`; `make
+docker-up` runs that local image through the same Compose file.
+
+On Linux, the image runs as the unprivileged `pocketfuse` user. If a bind
+mount was created with restrictive ownership, make the directory writable by
+the container user before starting it:
 
 ```sh
 mkdir -p data

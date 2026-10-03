@@ -1,30 +1,19 @@
 # syntax=docker/dockerfile:1.7
 
-# The Go server embeds web/dist. Build it before `docker build`
-# (`pnpm --dir web build`, `make docker-build`, or CI's frontend job) —
-# this Dockerfile only packages artifacts, it does not build the SPA.
+# This image packages prebuilt artifacts only — nothing is compiled here.
+# The build context must contain the Linux binaries in GoReleaser's layout:
+#   linux/amd64/pocketfuse, linux/arm64/pocketfuse
+# Both release paths stage it for you:
+#   - `goreleaser release` (dockers_v2) — CI, multi-arch push to GHCR
+#   - `make docker-build` — local, stages build/docker/ for this host arch
+# The SQLite driver (modernc.org/sqlite) is pure Go (CGO_ENABLED=0), so a
+# static binary runs on alpine for both architectures.
 
-# The SQLite driver (modernc.org/sqlite) is pure Go — no CGO, no libc, so
-# alpine works for both stages and cross-compiles cleanly.
-FROM golang:1.26-alpine AS backend
+FROM alpine:3.22
 
-WORKDIR /src
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . ./
-
-RUN test -f web/dist/index.html || (echo "web/dist is missing — run 'pnpm --dir web build' first" && exit 1)
-
-RUN CGO_ENABLED=0 go build \
-    -trimpath \
-    -ldflags='-s -w' \
-    -o /out/pocketfuse \
-    ./cmd/pocketfuse
-
-# Keep the runtime image small. /data is the only persistent mount required.
-FROM alpine:3.22 AS runtime
+# TARGETPLATFORM is set by BuildKit/buildx (e.g. linux/arm64) and selects
+# the matching prebuilt binary from the context.
+ARG TARGETPLATFORM
 
 RUN apk add --no-cache ca-certificates wget \
     && addgroup -S pocketfuse \
@@ -32,7 +21,7 @@ RUN apk add --no-cache ca-certificates wget \
     && mkdir -p /data \
     && chown pocketfuse:pocketfuse /data
 
-COPY --from=backend /out/pocketfuse /usr/local/bin/pocketfuse
+COPY ${TARGETPLATFORM}/pocketfuse /usr/local/bin/pocketfuse
 
 ENV POCKETFUSE_HOST=0.0.0.0 \
     POCKETFUSE_PORT=7625 \

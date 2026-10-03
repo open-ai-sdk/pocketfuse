@@ -43,11 +43,20 @@ test: frontend-build
 vet: frontend-build
 	$(GO) vet ./...
 
-docker-build: frontend-build
-	$(DOCKER) build -t $(APP_NAME):local .
+# Host arch for the local Linux binary staged into the Docker context
+# (GoReleaser layout: linux/<arch>/pocketfuse).
+HOST_ARCH := $(shell uname -m | sed -e s/aarch64/arm64/ -e s/x86_64/amd64/)
 
-docker-up: frontend-build
-	$(DOCKER) compose up --build
+docker-build: frontend-build
+	@mkdir -p build/docker/linux/$(HOST_ARCH)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(HOST_ARCH) $(GO) build \
+	    -trimpath -ldflags='-s -w' \
+	    -o build/docker/linux/$(HOST_ARCH)/$(APP_NAME) ./cmd/$(APP_NAME)
+	cp Dockerfile build/docker/Dockerfile
+	$(DOCKER) build -t $(APP_NAME):local build/docker
+
+docker-up: docker-build
+	POCKETFUSE_IMAGE=$(APP_NAME):local $(DOCKER) compose up
 
 docker-down:
 	$(DOCKER) compose down
@@ -59,5 +68,5 @@ docs-build:
 	@cd docs && $(PNPM) install --frozen-lockfile && $(PNPM) run build
 
 clean:
-	rm -rf "$(BIN_DIR)"
+	rm -rf "$(BIN_DIR)" build
 

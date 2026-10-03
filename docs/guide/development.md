@@ -36,7 +36,7 @@ make check   # frontend build, go test ./..., go vet ./...
 | Workflow | Trigger | Jobs |
 |---|---|---|
 | `ci.yml` | push/PR to `main` | golangci-lint · `go test -race` · frontend `vp check`+tsc+test · goreleaser snapshot |
-| `release.yml` | tag `v*` | goreleaser binaries + GitHub release · docker → `ghcr.io/open-ai-sdk/pocketfuse` (amd64+arm64) |
+| `release.yml` | tag `v*` | goreleaser: binaries + GitHub release + multi-arch image → `ghcr.io/open-ai-sdk/pocketfuse` (amd64+arm64) |
 | `docs.yml` | push to `main` touching `docs/**` | vitepress build → GitHub Pages |
 
 ## Project layout

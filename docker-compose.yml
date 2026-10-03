@@ -1,8 +1,8 @@
 services:
   pocketfuse:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # Runs the published image by default; `make docker-up` overrides this
+    # with the locally built pocketfuse:local.
+    image: ${POCKETFUSE_IMAGE:-ghcr.io/open-ai-sdk/pocketfuse:latest}
     environment:
       # The process always listens on 7625 inside the container. The value of
       # POCKETFUSE_PORT controls the host port in the mapping below.
@@ -20,4 +20,3 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
-

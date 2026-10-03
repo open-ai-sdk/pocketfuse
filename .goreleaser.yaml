@@ -41,6 +41,26 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# Multi-arch GHCR image built from the binaries above via `docker buildx
+# build --push` (single step, no separate docker job). The Dockerfile only
+# copies linux/<arch>/pocketfuse from the staged build context.
+dockers_v2:
+  - id: pocketfuse
+    images:
+      - ghcr.io/open-ai-sdk/pocketfuse
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    annotations:
+      "org.opencontainers.image.description": "Pocketfuse — local-first LLM tracing"
+      "org.opencontainers.image.source": "{{ .GitURL }}"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+
 release:
   github:
     owner: open-ai-sdk

@@ -33,10 +33,12 @@ make build
 
 ```sh
 mkdir -p data
-make docker-up     # builds web/dist, then docker compose up --build
+docker compose up -d   # pulls ghcr.io/open-ai-sdk/pocketfuse:latest
 ```
 
-Data persists in `./data` (bind-mounted to `/data` in the container).
+Open <http://127.0.0.1:7625>. Data persists in `./data` (bind-mounted to
+`/data` in the container). Prefer building from source? `make docker-up`
+builds a local image and runs it through the same Compose file.
 
 ## Send your first trace
 

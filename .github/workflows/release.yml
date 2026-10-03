@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   goreleaser:
-    name: GoReleaser (binaries + GitHub release)
+    name: GoReleaser (binaries + GitHub release + GHCR image)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,33 +30,9 @@ jobs:
           node-version: "24"
           cache: true
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  docker:
-    name: Docker image (GHCR, multi-arch)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Setup Vite+ toolchain
-        uses: voidzero-dev/setup-vp@v1.21.1
-        with:
-          node-version: "24"
-          cache: true
-
-      # The Dockerfile packages artifacts only — web/dist must exist.
-      - name: Build frontend
-        run: |
-          pnpm --dir web install --frozen-lockfile
-          pnpm --dir web run build
-
+      # dockers_v2 builds linux/amd64 + linux/arm64 manifests in one
+      # `docker buildx build --push`; QEMU emulates the alpine `apk` steps
+      # for the non-native arch (binaries are cross-compiled natively).
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
@@ -69,25 +45,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
         with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
-
-      # web/dist is built in this job; QEMU emulation builds each arch's CGO
-      # binary natively inside the Debian-based Dockerfile.
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

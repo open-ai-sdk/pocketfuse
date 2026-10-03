@@ -9,7 +9,11 @@ data
 .env
 .env.*
 
-# Keep web/dist (required by go:embed); drop everything else heavy.
+# Guard for a manual `docker build .` from the repo root — official builds
+# (goreleaser dockers_v2, make docker-build) use a staged context
+# (build/docker) with prebuilt binaries only, so this file never applies.
 web/node_modules
 web/.vite
+web/dist
 node_modules
+build
