@@ -1,7 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useSuspenseQuery } from '@tanstack/react-query'
 import { Link, useParams, useNavigate, useSearch } from '@tanstack/react-router'
 import {
-  AlertCircle,
   ArrowLeft,
   Bot,
   ChevronDown,
@@ -19,7 +18,8 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
-import { getScores, getTrace, type Observation, type Score, type Trace } from '../lib/api'
+import { type Observation, type Score, type Trace } from '../lib/api'
+import { traceOptions, traceScoresOptions } from '../lib/queries'
 import {
   buildObservationTree,
   flattenTree,
@@ -47,17 +47,7 @@ import { TimelineView } from '../components/trace/timeline-view'
 import { GraphView } from '../components/trace/graph-view'
 import { TraceLogView } from '../components/trace/log-view'
 import { ScoreRows } from '../components/trace/score-rows'
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-  Badge,
-  Button,
-  Input,
-  Separator,
-  Skeleton,
-} from '../components/ui'
+import { Badge, Button, Input, Separator } from '../components/ui'
 import { MetricCell, MetricStrip, StatusChip, panelSurface } from './primitives'
 
 // Left-panel view modes for exploring a trace's structure.
@@ -812,19 +802,11 @@ export function TraceDetailPage() {
     })
   }
   const setSelectedId = (id: string) => patchSearch({ obs: id })
-  const traceQuery = useQuery({
-    queryKey: ['trace', traceId],
-    queryFn: () => getTrace(traceId),
-    enabled: Boolean(traceId),
-    // Poll while any observation is still running.
-    refetchInterval: (query) =>
-      query.state.data?.observations?.some(observationIsPending) ? 3000 : false,
-  })
-  const scoresQuery = useQuery({
-    queryKey: ['scores', traceId],
-    queryFn: () => getScores({ traceId, limit: 200 }),
-    enabled: Boolean(traceId),
-  })
+  // The route loader ensures both queries before this page renders; the
+  // suspense reads hit the warm cache, so the page paints complete data
+  // immediately (no in-page loading skeletons needed).
+  const traceQuery = useSuspenseQuery(traceOptions(traceId))
+  const scoresQuery = useSuspenseQuery(traceScoresOptions(traceId))
   const trace = traceQuery.data
   const scores = scoresQuery.data?.data ?? []
 
@@ -887,9 +869,9 @@ export function TraceDetailPage() {
   }
 
   return (
-    <div className='flex min-h-full flex-col bg-background-primary text-content-primary'>
+    <div className='flex min-h-full flex-col text-content-primary'>
       {/* ── header ─────────────────────────────────────────── */}
-      <div className='border-b border-border-primary bg-background-primary px-4 py-4 sm:px-6'>
+      <div className='border-b border-border-primary px-4 py-4 sm:px-6'>
         <Link
           to='/traces'
           className='mb-3 inline-flex items-center gap-1 text-xs font-medium text-content-secondary hover:text-content-brand hover:underline'
@@ -897,28 +879,7 @@ export function TraceDetailPage() {
           <ArrowLeft className='size-3' />
           Back to traces
         </Link>
-        {traceQuery.isLoading ? (
-          <>
-            <Skeleton className='h-7 w-60' />
-            <Skeleton className='mt-2 h-3.5 w-44' />
-          </>
-        ) : traceQuery.isError ? (
-          <Alert variant='destructive' className='max-w-2xl rounded-[4px]'>
-            <AlertCircle />
-            <AlertTitle>Could not load this trace</AlertTitle>
-            <AlertDescription>
-              {traceQuery.error instanceof Error
-                ? traceQuery.error.message
-                : 'The local API returned an error.'}
-            </AlertDescription>
-            <AlertAction>
-              <Button variant='outline' size='sm' onClick={() => void traceQuery.refetch()}>
-                <RefreshCw data-icon='inline-start' />
-                Try again
-              </Button>
-            </AlertAction>
-          </Alert>
-        ) : trace ? (
+        {trace ? (
           <div className='flex flex-col justify-between gap-3 sm:flex-row sm:items-start'>
             <div className='min-w-0'>
               <div className='flex flex-wrap items-center gap-2'>

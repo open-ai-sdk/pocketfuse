@@ -14,8 +14,9 @@ import {
   TimerReset,
   Zap,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { getTraces, type Trace, type TraceFilters, type TraceStatus } from '../lib/api'
+import { useMemo, useState } from 'react'
+import { type Trace, type TraceFilters, type TraceStatus } from '../lib/api'
+import { TRACES_PAGE_SIZE, tracesOptions } from '../lib/queries'
 import { cn, formatCost, formatDuration, formatRelative } from '../lib/utils'
 import { Button, CardContent, Input, Skeleton } from '../components/ui'
 import {
@@ -37,7 +38,7 @@ import {
 } from '../components/ui/select'
 import { MetricCell, MetricStrip, PageHeader, Panel, StatusChip, EmptyPanel } from './primitives'
 
-const pageSize = 25
+const pageSize = TRACES_PAGE_SIZE
 
 function statusTone(status?: string): 'neutral' | 'green' | 'red' | 'amber' {
   const value = status?.toLowerCase()
@@ -213,18 +214,9 @@ export function TracesPage() {
     }),
     [search, project, timeRange, page],
   )
-  const tracesQuery = useQuery({
-    queryKey: ['traces', filters],
-    queryFn: () => getTraces(filters),
-    placeholderData: (previous) => previous,
-  })
-  useEffect(() => {
-    const refresh = () => {
-      void tracesQuery.refetch()
-    }
-    window.addEventListener('pocketfuse:refresh', refresh)
-    return () => window.removeEventListener('pocketfuse:refresh', refresh)
-  }, [tracesQuery.refetch])
+  // The route loader ensures the initial (unfiltered) query; this read hits
+  // the warm cache on first render and only fetches on filter changes.
+  const tracesQuery = useQuery(tracesOptions(filters))
 
   const traces = tracesQuery.data?.data ?? []
   const total = tracesQuery.data?.total ?? 0
@@ -249,7 +241,7 @@ export function TracesPage() {
   }
 
   return (
-    <div className='min-h-full bg-background-primary text-content-primary'>
+    <div className='min-h-full text-content-primary'>
       <PageHeader
         eyebrow='Observe'
         title='Traces'

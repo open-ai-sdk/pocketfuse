@@ -14,7 +14,7 @@ export function PlaceholderPage({
   icon?: LucideIcon
 }) {
   return (
-    <div className='min-h-full bg-background-primary text-content-primary'>
+    <div className='min-h-full text-content-primary'>
       <PageHeader eyebrow='Workspace' title={title} description={description} />
       <div className='px-4 py-5 sm:px-6'>
         <div className={panelSurface}>
