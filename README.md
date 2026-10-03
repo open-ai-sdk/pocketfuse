@@ -13,7 +13,7 @@ Requirements:
 
 - Go 1.26 or newer
 - Node.js 22 or newer and pnpm
-- CGO support (a C compiler is not required — the SQLite driver is pure Go)
+- No C toolchain: the SQLite driver is pure Go, so CGO is disabled
 
 From this directory:
 

@@ -15,8 +15,30 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"golang.org/x/text/cases"
+	sqlite "modernc.org/sqlite"
 )
+
+// unicodeContains is a SQL scalar function providing Unicode-aware
+// case-insensitive substring matching (SQLite's LIKE only folds ASCII).
+// Used by name filters as `unicode_contains(name, ?)`; NULL haystack or
+// needle yields 0.
+var unicodeFold = cases.Fold()
+
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction("unicode_contains", 2,
+		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			haystack, _ := args[0].(string)
+			needle, _ := args[1].(string)
+			if haystack == "" || needle == "" {
+				return int64(0), nil
+			}
+			if strings.Contains(unicodeFold.String(haystack), unicodeFold.String(needle)) {
+				return int64(1), nil
+			}
+			return int64(0), nil
+		})
+}
 
 const (
 	defaultPage  = 1

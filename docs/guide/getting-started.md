@@ -7,7 +7,7 @@ networks only.
 
 ## Requirements
 
-- Go 1.25+ with CGO (a C compiler — not required — the SQLite driver is pure Go)
+- Go 1.26+ (CGO and a C compiler are not required — the SQLite driver is pure Go)
 - Node.js 22+ and pnpm (frontend build only)
 
 ## Run locally
