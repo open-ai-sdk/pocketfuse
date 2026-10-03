@@ -2,8 +2,9 @@
 //
 // The frontend build writes its Vite output to dist/. Keeping the embed point
 // in this small package lets the server stay independent of the frontend
-// implementation and also makes `go run ./cmd/pocketfuse` work from a checkout
-// that only contains the placeholder page.
+// implementation. dist/ is gitignored, so CI Go jobs stub it before building
+// (see "Stub embedded frontend" in ci.yml); run `make frontend-build` to
+// populate it for real binaries.
 package web
 
 import "embed"
