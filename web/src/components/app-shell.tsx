@@ -215,13 +215,12 @@ export function AppShell() {
   return (
     <SidebarProvider className='h-svh overflow-hidden bg-background-primary'>
       <AppSidebar />
-      {/* Canvas vs card differ by only ~3 RGB points in this palette — the
-          stock inset shadow alone leaves the card edge invisible, so add
-          the same hairline the panels use. shadow-none stops the ambient
-          stacking on the ring (it read ~20% darker than every panel
-          border); overflow-hidden clips the header's square corners to
+      {/* Canvas vs card differ by only ~3 RGB points in this palette —
+          add the panel hairline so the card edge reads; the stock
+          shadow-sm stays for depth (it darkens the ring slightly —
+          accepted). overflow-hidden clips the header's square corners to
           the card's rounded ones. */}
-      <SidebarInset className='min-h-0 overflow-hidden shadow-none ring-1 ring-border-primary'>
+      <SidebarInset className='min-h-0 overflow-hidden ring-1 ring-border-primary'>
         <Topbar />
         {/* key by pathname so each page starts scrolled to top */}
         <div key={pathname} className='min-h-0 flex-1 overflow-y-auto'>
