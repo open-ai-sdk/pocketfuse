@@ -1,30 +1,52 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useParams, useNavigate, useSearch } from '@tanstack/react-router'
 import {
   Activity,
   AlertCircle,
   ArrowLeft,
   Bot,
-  Check,
   ChevronDown,
   ChevronRight,
   CircleDot,
   Clock3,
-  Copy,
   Database,
+  Download,
   FileText,
   GitBranch,
   Hash,
+  Layers,
+  ListTree,
   MessageSquare,
   RefreshCw,
+  Rows3,
   Sparkles,
   Star,
   UserRound,
   Wrench,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { getTrace, type Observation, type Trace } from '../lib/api'
-import { cn, formatCost, formatDate, formatDuration, formatTokens, prettyJson } from '../lib/utils'
+import { useMemo, useRef, useState } from 'react'
+import { getScores, getTrace, type Observation, type Score, type Trace } from '../lib/api'
+import {
+  buildObservationTree,
+  flattenTree,
+  observationDurationMs,
+  observationTokens,
+  observationIsPending,
+  observationOffsetMs,
+  traceWindow,
+  type FlatNode,
+  type TreeNode,
+} from '../lib/trace-tree'
+import {
+  cn,
+  formatCost,
+  formatDate,
+  formatDuration,
+  formatRelative,
+  formatTokens,
+  prettyJson,
+} from '../lib/utils'
+import { IOPreview } from '../components/io-preview'
 import {
   Alert,
   AlertAction,
@@ -34,270 +56,699 @@ import {
   Button,
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
   EmptyState,
+  Input,
   Separator,
   Skeleton,
 } from '../components/ui'
-import { MetricCell, MetricStrip, Panel, StatusChip, panelSurface } from './primitives'
+import { MetricCell, MetricStrip, StatusChip, panelSurface } from './primitives'
 
-function kindFor(observation: Observation) {
-  const type = observation.type?.toLowerCase()
-  if (type?.includes('generation') || type?.includes('llm'))
-    return {
-      label: 'Generation',
-      icon: Sparkles,
-      tone: 'violet' as const,
-      iconClass: 'border-border-secondary bg-surface-accent text-content-accent',
-    }
-  if (type?.includes('span') || type?.includes('chain'))
-    return {
-      label: 'Span',
-      icon: GitBranch,
-      tone: 'blue' as const,
-      iconClass: 'border-border-information bg-surface-information text-content-information',
-    }
-  if (type?.includes('event'))
-    return {
-      label: 'Event',
-      icon: CircleDot,
-      tone: 'amber' as const,
-      iconClass: 'border-border-warning bg-surface-warning text-content-warning',
-    }
-  return {
-    label: observation.type || 'Observation',
-    icon: Wrench,
-    tone: 'neutral' as const,
-    iconClass: 'border-border-primary bg-surface-tertiary text-content-secondary',
-  }
+// Observation type → label/icon/tone map.
+const KIND_BY_TYPE: Record<
+  string,
+  { label: string; icon: typeof Sparkles; tone: 'violet' | 'blue' | 'amber' | 'green' | 'neutral' }
+> = {
+  GENERATION: { label: 'Generation', icon: Sparkles, tone: 'violet' },
+  SPAN: { label: 'Span', icon: GitBranch, tone: 'blue' },
+  EVENT: { label: 'Event', icon: CircleDot, tone: 'green' },
+  AGENT: { label: 'Agent', icon: Bot, tone: 'violet' },
+  TOOL: { label: 'Tool', icon: Wrench, tone: 'amber' },
+  CHAIN: { label: 'Chain', icon: Layers, tone: 'blue' },
+  RETRIEVER: { label: 'Retriever', icon: Database, tone: 'blue' },
+  EMBEDDING: { label: 'Embedding', icon: Rows3, tone: 'neutral' },
 }
 
-function TimelineItem({ observation, depth }: { observation: Observation; depth: number }) {
-  const [open, setOpen] = useState(true)
-  const kind = kindFor(observation)
-  const Icon = kind.icon
-  const [copied, setCopied] = useState<string | null>(null)
-  const copy = async (value: unknown, name: string) => {
-    try {
-      await navigator.clipboard.writeText(prettyJson(value))
-      setCopied(name)
-      window.setTimeout(() => setCopied(null), 1300)
-    } catch {
-      /* clipboard can be unavailable in HTTP local mode */
-    }
-  }
+function kindFor(type?: string) {
   return (
-    <div className='relative' style={{ marginLeft: `${Math.min(depth, 3) * 22}px` }}>
-      <Separator
-        orientation='vertical'
-        className='absolute -left-4 top-5 bottom-0 bg-border-primary'
-      />
-      <Card
-        className={cn(
-          'relative mb-3 gap-0 rounded-[4px] border-border-primary bg-surface-primary p-0 shadow-none ring-0',
-          open && 'border-border-secondary',
-        )}
-      >
-        <CardHeader className='flex min-h-[56px] flex-row items-center gap-2.5 px-3.5 py-3'>
-          <Button
-            variant='ghost'
-            size='icon-xs'
-            onClick={() => setOpen((value) => !value)}
-            aria-label={open ? 'Collapse observation' : 'Expand observation'}
-            aria-expanded={open}
-            className='text-content-secondary hover:bg-interactive-secondary-hover hover:text-content-brand'
+    KIND_BY_TYPE[type?.toUpperCase() ?? ''] ?? {
+      label: type || 'Observation',
+      icon: Wrench,
+      tone: 'neutral' as const,
+    }
+  )
+}
+
+// Score chips grouped by name.
+function ScoreBadges({ scores, className }: { scores: Score[]; className?: string }) {
+  const groups = useMemo(() => {
+    const byName = new Map<string, Score[]>()
+    for (const score of scores) {
+      const name = score.name || 'score'
+      byName.set(name, [...(byName.get(name) ?? []), score])
+    }
+    return [...byName.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [scores])
+  if (groups.length === 0) return null
+  return (
+    <div className={cn('flex flex-wrap items-center gap-1.5', className)}>
+      {groups.map(([name, items]) => (
+        <span
+          key={name}
+          title={items
+            .map(
+              (s) =>
+                `${s.value !== undefined ? s.value.toFixed(2) : (s.stringValue ?? '—')}${s.comment ? ` — ${s.comment}` : ''}`,
+            )
+            .join('\n')}
+        >
+          <Badge
+            tone='blue'
+            className='gap-1 rounded-[3px] px-1.5 font-mono text-[10px] normal-case'
           >
-            {open ? <ChevronDown /> : <ChevronRight />}
-          </Button>
-          <div
-            className={cn(
-              'flex size-7 shrink-0 items-center justify-center rounded-[3px] border',
-              kind.iconClass,
-            )}
-          >
-            <Icon className='size-3.5' />
-          </div>
-          <div className='min-w-0 flex-1'>
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <span className='truncate text-xs font-medium text-content-primary'>
-                {observation.name || 'Untitled observation'}
-              </span>
-              <Badge tone={kind.tone} className='h-5 rounded-[3px] px-1.5 text-[10px]'>
-                {kind.label}
-              </Badge>
-              {observation.level && (
-                <Badge
-                  tone={observation.level.toLowerCase() === 'error' ? 'red' : 'neutral'}
-                  className='h-5 rounded-[3px] px-1.5 font-mono text-[10px] uppercase'
-                >
-                  {observation.level}
-                </Badge>
-              )}
-            </div>
-            <div className='mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-content-tertiary'>
-              <span className='font-mono'>{observation.id.slice(0, 12)}</span>
-              {observation.model && (
-                <span className='flex items-center gap-1'>
-                  <Bot className='size-3' />
-                  {observation.model}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className='hidden shrink-0 text-right sm:block'>
-            <p className='font-mono text-[11px] tabular-nums text-content-secondary'>
-              {formatDuration(observation.duration)}
-            </p>
-            <p className='mt-1 text-[10px] text-content-tertiary'>
-              {formatDate(observation.startTime ?? observation.timestamp)}
-            </p>
-          </div>
-        </CardHeader>
-        {open && (
-          <CardContent className='border-t border-border-primary bg-surface-tertiary p-3.5'>
-            <div className='grid gap-3 lg:grid-cols-2'>
-              <DataBlock
-                label='Input'
-                value={observation.input}
-                copyKey='input'
-                copied={copied}
-                onCopy={copy}
-              />
-              <DataBlock
-                label='Output'
-                value={observation.output}
-                copyKey='output'
-                copied={copied}
-                onCopy={copy}
-              />
-            </div>
-            {observation.metadata && Object.keys(observation.metadata).length > 0 && (
-              <div className='mt-3'>
-                <DataBlock
-                  label='Metadata'
-                  value={observation.metadata}
-                  copyKey='metadata'
-                  copied={copied}
-                  onCopy={copy}
-                />
-              </div>
-            )}
-          </CardContent>
-        )}
-      </Card>
+            <Star className='size-2.5' />
+            {name}:{' '}
+            {items
+              .map((s) => (s.value !== undefined ? s.value.toFixed(2) : (s.stringValue ?? '—')))
+              .join(', ')}
+          </Badge>
+        </span>
+      ))}
     </div>
   )
 }
 
-function DataBlock({
-  label,
-  value,
-  copyKey,
-  copied,
-  onCopy,
+// One tree row: ├/└ guide lines + type icon + name + latency/token/cost
+// metrics + a proportional duration bar. Flattened DFS: ancestor
+// guide lines encode the ancestor chain, not pixel nesting.
+function TreeRow({
+  flat,
+  selected,
+  onSelect,
+  collapsed,
+  onToggle,
+  window: timeWindow,
 }: {
-  label: string
-  value: unknown
-  copyKey: string
-  copied: string | null
-  onCopy: (value: unknown, name: string) => void
+  flat: FlatNode
+  selected: boolean
+  onSelect: () => void
+  collapsed: boolean
+  onToggle: () => void
+  window: { originMs: number; endMs: number }
 }) {
-  const content = prettyJson(value)
+  const { node, treeLines, isLastSibling } = flat
+  const observation = node.observation
+  const kind = kindFor(observation.type)
+  const Icon = kind.icon
+  const tokens = observationTokens(observation)
+  const pending = observationIsPending(observation)
+  const span = timeWindow.endMs - timeWindow.originMs
+  const left = Math.max(0, ((node.startMs - timeWindow.originMs) / span) * 100)
+  const width = pending
+    ? Math.max(2, 100 - left) // in-flight: bar runs to the window's right edge
+    : Math.max(1.5, node.durationMs !== undefined ? (node.durationMs / span) * 100 : 1.5)
+  const hasChildren = node.children.length > 0
+
   return (
-    <Card
-      size='sm'
-      className='min-w-0 gap-2 rounded-[4px] border-border-primary bg-surface-primary p-0 shadow-none ring-0'
+    <div
+      role='treeitem'
+      aria-selected={selected}
+      aria-expanded={hasChildren ? !collapsed : undefined}
+      className={cn(
+        'group relative flex cursor-pointer items-stretch rounded-[2px] pr-2',
+        selected ? 'bg-interactive-secondary-hover' : 'hover:bg-surface-tertiary',
+      )}
+      onClick={onSelect}
     >
-      <CardHeader className='flex flex-row items-center justify-between px-3 pt-2.5 pb-0'>
-        <CardTitle className='font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
-          {label}
-        </CardTitle>
-        {value !== undefined && value !== null && (
-          <Button
-            variant='ghost'
-            size='xs'
-            onClick={() => onCopy(value, copyKey)}
-            aria-label={`Copy ${label.toLowerCase()}`}
-            className='text-content-secondary hover:bg-interactive-secondary-hover hover:text-content-brand'
-          >
-            {copied === copyKey ? (
-              <>
-                <Check data-icon='inline-start' />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy data-icon='inline-start' />
-                Copy
-              </>
+      {/* ancestor guide lines */}
+      {treeLines.map((hasLaterSiblings, depth) => (
+        <span key={depth} className='relative w-5 shrink-0'>
+          {hasLaterSiblings && (
+            <span className='absolute left-[11px] top-0 h-full w-px bg-border-primary' />
+          )}
+        </span>
+      ))}
+      {/* own connector stub */}
+      {node.depth > 0 && (
+        <span className='relative w-5 shrink-0'>
+          <span
+            className={cn(
+              'absolute left-[11px] top-0 w-px bg-border-primary',
+              isLastSibling ? 'h-1/2' : 'h-full',
             )}
-          </Button>
+          />
+          <span className='absolute left-[11px] top-1/2 h-px w-2 bg-border-primary' />
+        </span>
+      )}
+      {/* collapse chevron */}
+      <button
+        type='button'
+        aria-label={collapsed ? 'Expand' : 'Collapse'}
+        className={cn(
+          'my-auto flex size-4 shrink-0 items-center justify-center rounded-[2px] text-content-tertiary hover:text-content-primary',
+          !hasChildren && 'invisible',
         )}
-      </CardHeader>
-      <CardContent className='px-3 pb-3'>
-        <pre className='max-h-64 min-h-12 overflow-auto whitespace-pre-wrap break-words rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[11px] leading-5 text-content-secondary'>
-          {content || <span className='text-content-tertiary'>No data</span>}
-        </pre>
-      </CardContent>
-    </Card>
+        onClick={(event) => {
+          event.stopPropagation()
+          onToggle()
+        }}
+      >
+        <ChevronRight className={cn('size-3 transition-transform', !collapsed && 'rotate-90')} />
+      </button>
+      <span
+        className={cn(
+          'my-1 flex size-5 shrink-0 items-center justify-center rounded-[3px] border',
+          kind.tone === 'violet' && 'border-border-secondary bg-surface-accent text-content-accent',
+          kind.tone === 'blue' &&
+            'border-border-information bg-surface-information text-content-information',
+          kind.tone === 'green' && 'border-border-success bg-surface-success text-content-success',
+          kind.tone === 'amber' && 'border-border-warning bg-surface-warning text-content-warning',
+          kind.tone === 'neutral' &&
+            'border-border-primary bg-surface-tertiary text-content-secondary',
+        )}
+      >
+        <Icon className='size-3' />
+      </span>
+      <span className='ml-1.5 flex min-w-0 flex-1 flex-col py-1'>
+        <span className='flex items-baseline gap-1.5'>
+          <span className='truncate text-xs font-medium text-content-primary'>
+            {observation.name || 'Untitled observation'}
+          </span>
+          <span className='shrink-0 text-[9.5px] uppercase tracking-wide text-content-tertiary'>
+            {kind.label}
+          </span>
+          {observation.level && observation.level.toUpperCase() !== 'DEFAULT' && (
+            <span
+              className={cn(
+                'shrink-0 font-mono text-[9.5px] uppercase',
+                observation.level.toUpperCase() === 'ERROR'
+                  ? 'text-content-error'
+                  : 'text-content-warning',
+              )}
+            >
+              {observation.level}
+            </span>
+          )}
+        </span>
+        {/* duration bar — pending rows pulse to the window edge */}
+        <span className='relative mt-1 h-1 w-full overflow-hidden rounded-full bg-surface-tertiary'>
+          <span
+            className={cn(
+              'absolute inset-y-0 rounded-full',
+              observation.level?.toUpperCase() === 'ERROR'
+                ? 'bg-action-error'
+                : pending
+                  ? 'animate-pulse bg-action-warning'
+                  : 'bg-action-brand',
+            )}
+            style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
+          />
+        </span>
+        <span className='mt-1 flex items-center gap-2 text-[9.5px] text-content-tertiary'>
+          <span className='font-mono tabular-nums'>
+            +{formatDuration(observationOffsetMs(node, timeWindow.originMs))}
+          </span>
+          <span className='font-mono tabular-nums'>
+            {pending ? 'running' : formatDuration(observation.duration ?? node.durationMs)}
+          </span>
+          {tokens.total !== undefined && <span>{formatTokens(tokens.total)} tok</span>}
+          {observation.cost !== undefined && <span>{formatCost(observation.cost)}</span>}
+          {observation.model && <span className='truncate'>{observation.model}</span>}
+        </span>
+      </span>
+    </div>
   )
 }
+// Left navigation panel: toolbar (search, expand/collapse all) + flattened
+// observation tree. Synthetic TRACE row on top selects the trace itself.
+function TraceNav({
+  trace,
+  roots,
+  selectedId,
+  onSelect,
+  timeWindow,
+  durationMs,
+}: {
+  trace: Trace
+  roots: TreeNode[]
+  selectedId: string
+  onSelect: (id: string) => void
+  timeWindow: { originMs: number; endMs: number }
+  durationMs?: number
+}) {
+  const [query, setQuery] = useState('')
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [errorsOnly, setErrorsOnly] = useState(false)
+  const treeRef = useRef<HTMLDivElement>(null)
 
-function TraceOverview({ trace }: { trace: Trace }) {
-  return (
-    <MetricStrip className='grid-cols-2 sm:grid-cols-4'>
-      <MetricCell label='Duration' value={formatDuration(trace.duration ?? trace.latency)} />
-      <MetricCell
-        label='Observations'
-        value={trace.observationCount ?? trace.observations?.length ?? 0}
-      />
-      <MetricCell label='Tokens' value={formatTokens(trace.totalTokens)} />
-      <MetricCell label='Cost' value={formatCost(trace.totalCost)} />
-    </MetricStrip>
+  const toggleCollapse = (id: string) =>
+    setCollapsed((previous) => {
+      const next = new Set(previous)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const types = useMemo(
+    () =>
+      [
+        ...new Set(
+          roots
+            .flatMap(function collect(node: TreeNode): string[] {
+              return [node.observation.type ?? '', ...node.children.flatMap(collect)]
+            })
+            .filter(Boolean),
+        ),
+      ].sort(),
+    [roots],
   )
-}
 
-function traceDepths(observations: Observation[]) {
-  const byId = new Map(observations.map((observation) => [observation.id, observation]))
-  const depths = new Map<string, number>()
-  const resolve = (observation: Observation, seen = new Set<string>()): number => {
-    if (depths.has(observation.id)) return depths.get(observation.id) ?? 0
-    if (!observation.parentObservationId || seen.has(observation.id)) {
-      depths.set(observation.id, 0)
-      return 0
+  const rows = useMemo(() => {
+    const flat = flattenTree(roots, collapsed)
+    const needle = query.trim().toLowerCase()
+    const matches = (f: FlatNode) =>
+      (!typeFilter || (f.node.observation.type ?? '').toUpperCase() === typeFilter) &&
+      (!errorsOnly || (f.node.observation.level ?? '').toUpperCase() === 'ERROR') &&
+      (!needle || (f.node.observation.name ?? '').toLowerCase().includes(needle))
+    const visible = new Set<string>()
+    const byId = new Map(flat.map((f) => [f.node.observation.id, f]))
+    for (const f of flat) {
+      if (!matches(f)) continue
+      // keep ancestors of matches visible so the tree stays readable
+      let current: FlatNode | undefined = f
+      while (current) {
+        visible.add(current.node.observation.id)
+        const parentId: string | undefined = current.node.observation.parentObservationId
+        current = parentId ? byId.get(parentId) : undefined
+      }
     }
-    seen.add(observation.id)
-    const parent = byId.get(observation.parentObservationId)
-    const depth = parent ? resolve(parent, seen) + 1 : 0
-    depths.set(observation.id, depth)
-    return depth
-  }
-  observations.forEach((observation) => resolve(observation))
-  return depths
+    return flat.filter((f) => visible.has(f.node.observation.id))
+  }, [roots, collapsed, query, typeFilter, errorsOnly])
+  const expandAll = () => setCollapsed(new Set())
+  const collapseAll = () =>
+    setCollapsed(
+      new Set(
+        rows
+          .map((r) => r.node)
+          .filter((n) => n.children.length > 0)
+          .map((n) => n.observation.id),
+      ),
+    )
+
+  return (
+    <div className='flex min-h-0 flex-col'>
+      <div className='flex items-center gap-1.5 border-b border-border-primary px-2.5 py-2'>
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder='Find in this trace'
+          className='h-7 rounded-[3px] border-border-primary bg-surface-tertiary text-[11px] shadow-none'
+        />
+        <Button
+          variant='ghost'
+          size='icon-xs'
+          onClick={expandAll}
+          aria-label='Expand all'
+          title='Expand all'
+          className='text-content-secondary'
+        >
+          <ChevronDown />
+        </Button>
+        <Button
+          variant='ghost'
+          size='icon-xs'
+          onClick={collapseAll}
+          aria-label='Collapse all'
+          title='Collapse all'
+          className='text-content-secondary'
+        >
+          <ChevronRight />
+        </Button>
+      </div>
+      {(types.length > 1 || errorsOnly) && (
+        <div className='flex flex-wrap items-center gap-1 border-b border-border-primary px-2.5 py-1.5'>
+          {types.map((type) => {
+            const active = typeFilter === type
+            return (
+              <button
+                key={type}
+                type='button'
+                onClick={() => setTypeFilter(active ? null : type)}
+                className={cn(
+                  'rounded-[3px] border px-1.5 py-0.5 font-mono text-[9.5px] uppercase',
+                  active
+                    ? 'border-border-brand bg-interactive-secondary-hover text-content-brand'
+                    : 'border-border-primary text-content-tertiary hover:text-content-secondary',
+                )}
+              >
+                {type}
+              </button>
+            )
+          })}
+          <button
+            type='button'
+            onClick={() => setErrorsOnly((value) => !value)}
+            className={cn(
+              'rounded-[3px] border px-1.5 py-0.5 font-mono text-[9.5px] uppercase',
+              errorsOnly
+                ? 'border-border-error bg-surface-error text-content-error'
+                : 'border-border-primary text-content-tertiary hover:text-content-secondary',
+            )}
+          >
+            Errors
+          </button>
+        </div>
+      )}
+      <div
+        role='tree'
+        ref={treeRef}
+        tabIndex={0}
+        className='min-h-0 flex-1 overflow-auto p-1.5 outline-none'
+        onKeyDown={(event) => {
+          // Keyboard navigation over the flattened rows.
+          const order = ['trace', ...rows.map((r) => r.node.observation.id)]
+          const index = order.indexOf(selectedId)
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            const next =
+              order[
+                Math.max(
+                  0,
+                  Math.min(order.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)),
+                )
+              ]
+            onSelect(next)
+            treeRef.current
+              ?.querySelector(`[aria-selected="true"]`)
+              ?.scrollIntoView({ block: 'nearest' })
+          } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+            const flat = rows.find((r) => r.node.observation.id === selectedId)
+            if (!flat) return
+            event.preventDefault()
+            if (event.key === 'ArrowRight') {
+              if (collapsed.has(selectedId)) toggleCollapse(selectedId)
+            } else if (!collapsed.has(selectedId)) toggleCollapse(selectedId)
+          }
+        }}
+      >
+        {/* synthetic TRACE root row — selects the trace itself */}
+        <div
+          role='treeitem'
+          aria-selected={selectedId === 'trace'}
+          className={cn(
+            'flex cursor-pointer items-center gap-1.5 rounded-[2px] px-1.5 py-1.5',
+            selectedId === 'trace' ? 'bg-interactive-secondary-hover' : 'hover:bg-surface-tertiary',
+          )}
+          onClick={() => onSelect('trace')}
+        >
+          <ListTree className='size-3.5 shrink-0 text-content-brand' />
+          <span className='min-w-0 flex-1 truncate text-xs font-semibold text-content-primary'>
+            {trace.name || 'Trace'}
+          </span>
+          <span className='shrink-0 font-mono text-[9.5px] text-content-tertiary'>
+            {formatDuration(durationMs)}
+          </span>
+        </div>
+        <Separator className='my-1 bg-border-primary' />
+        {rows.length === 0 ? (
+          <p className='px-2 py-6 text-center text-[11px] text-content-tertiary'>
+            {query ? 'No matching observations' : 'No observations recorded'}
+          </p>
+        ) : (
+          rows.map((flat) => (
+            <TreeRow
+              key={flat.node.observation.id}
+              flat={flat}
+              selected={selectedId === flat.node.observation.id}
+              onSelect={() => onSelect(flat.node.observation.id)}
+              collapsed={collapsed.has(flat.node.observation.id)}
+              onToggle={() => toggleCollapse(flat.node.observation.id)}
+              window={timeWindow}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Right panel when the TRACE root is selected.
+function TraceDetailView({
+  trace,
+  scores,
+  totalTokens,
+  durationMs,
+}: {
+  trace: Trace
+  scores: Score[]
+  totalTokens?: number
+  durationMs?: number
+}) {
+  const detailRows = [
+    { label: 'Project', value: trace.project, icon: Database },
+    { label: 'Session', value: trace.sessionId, icon: MessageSquare },
+    { label: 'User', value: trace.userId, icon: UserRound },
+    { label: 'Started', value: formatDate(trace.startTime ?? trace.timestamp), icon: Clock3 },
+    { label: 'Release', value: trace.release ?? trace.version, icon: GitBranch },
+    { label: 'Environment', value: trace.environment, icon: Layers },
+  ]
+  return (
+    <div className='flex flex-col gap-3'>
+      <div className={cn(panelSurface, 'rounded-[4px] px-4 py-3')}>
+        <div className='flex flex-wrap items-center gap-2'>
+          <h2 className='text-sm font-semibold text-content-primary'>
+            {trace.name || 'Untitled trace'}
+          </h2>
+          <StatusChip status={trace.status} />
+          <ScoreBadges scores={scores} />
+        </div>
+        <div className='mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-content-secondary'>
+          <span className='font-mono text-content-tertiary'>{trace.id}</span>
+          <span>{formatRelative(trace.startTime ?? trace.timestamp)}</span>
+          <span className='font-mono'>{formatDuration(durationMs)}</span>
+          {totalTokens !== undefined && <span>{formatTokens(totalTokens)} tokens</span>}
+          {trace.totalCost !== undefined && <span>{formatCost(trace.totalCost)}</span>}
+        </div>
+        {trace.tags && trace.tags.length > 0 && (
+          <div className='mt-2 flex flex-wrap gap-1'>
+            {trace.tags.map((tag) => (
+              <Badge
+                key={tag}
+                tone='neutral'
+                className='rounded-[3px] font-mono text-[9.5px] text-content-secondary'
+              >
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className='grid gap-3 lg:grid-cols-2'>
+        <IOPreview label='Input' value={trace.input} />
+        <IOPreview label='Output' value={trace.output} />
+      </div>
+      <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
+        <h4 className='mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+          Details
+        </h4>
+        <dl className='grid gap-x-6 gap-y-2 sm:grid-cols-2'>
+          {detailRows.map(({ label, value, icon: Icon }) => (
+            <div key={label} className='flex items-start gap-2'>
+              <Icon className='mt-0.5 size-3.5 shrink-0 text-content-secondary' />
+              <div className='min-w-0'>
+                <dt className='font-mono text-[9.5px] uppercase tracking-[0.08em] text-content-tertiary'>
+                  {label}
+                </dt>
+                <dd className='truncate text-xs text-content-primary'>{value || '—'}</dd>
+              </div>
+            </div>
+          ))}
+        </dl>
+        {trace.metadata && Object.keys(trace.metadata).length > 0 && (
+          <pre className='mt-3 max-h-48 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
+            {prettyJson(trace.metadata)}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Right panel when an observation is selected.
+// Badge header + preview + attributes.
+function ObservationDetailView({
+  observation,
+  scores,
+}: {
+  observation: Observation
+  scores: Score[]
+}) {
+  const kind = kindFor(observation.type)
+  const Icon = kind.icon
+  const tokens = observationTokens(observation)
+  const ownScores = scores.filter((s) => s.observationId === observation.id)
+  const hasParams =
+    observation.modelParameters && Object.keys(observation.modelParameters).length > 0
+  const hasMetadata = observation.metadata && Object.keys(observation.metadata).length > 0
+
+  return (
+    <div className='flex flex-col gap-3'>
+      <div className={cn(panelSurface, 'rounded-[4px] px-4 py-3')}>
+        <div className='flex flex-wrap items-center gap-2'>
+          <span
+            className={cn(
+              'flex size-6 items-center justify-center rounded-[3px] border',
+              kind.tone === 'violet' &&
+                'border-border-secondary bg-surface-accent text-content-accent',
+              kind.tone === 'blue' &&
+                'border-border-information bg-surface-information text-content-information',
+              kind.tone === 'green' &&
+                'border-border-success bg-surface-success text-content-success',
+              kind.tone === 'amber' &&
+                'border-border-warning bg-surface-warning text-content-warning',
+              kind.tone === 'neutral' &&
+                'border-border-primary bg-surface-tertiary text-content-secondary',
+            )}
+          >
+            <Icon className='size-3.5' />
+          </span>
+          <h2 className='text-sm font-semibold text-content-primary'>
+            {observation.name || 'Untitled observation'}
+          </h2>
+          <Badge tone={kind.tone} className='rounded-[3px] px-1.5 text-[10px]'>
+            {kind.label}
+          </Badge>
+          {observation.level && observation.level.toUpperCase() !== 'DEFAULT' && (
+            <Badge
+              tone={observation.level.toUpperCase() === 'ERROR' ? 'red' : 'amber'}
+              className='rounded-[3px] px-1.5 font-mono text-[10px] uppercase'
+            >
+              {observation.level}
+            </Badge>
+          )}
+          <ScoreBadges scores={ownScores} />
+        </div>
+        <div className='mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-content-secondary'>
+          <span className='font-mono text-content-tertiary'>{observation.id}</span>
+          <span>{formatDate(observation.startTime ?? observation.timestamp)}</span>
+          <span className='font-mono'>
+            {formatDuration(observation.duration ?? observationDurationMs(observation))}
+          </span>
+          {tokens.total !== undefined && (
+            <span title={`input ${tokens.input ?? '—'} · output ${tokens.output ?? '—'}`}>
+              {formatTokens(tokens.total)} tokens
+            </span>
+          )}
+          {observation.cost !== undefined && <span>{formatCost(observation.cost)}</span>}
+          {observation.model && (
+            <span className='flex items-center gap-1'>
+              <Bot className='size-3' />
+              {observation.model}
+            </span>
+          )}
+        </div>
+        {observation.statusMessage && (
+          <p className='mt-2 rounded-[3px] border border-border-error bg-surface-error px-2.5 py-1.5 text-[11px] text-content-error'>
+            {observation.statusMessage}
+          </p>
+        )}
+      </div>
+      <div className='grid gap-3 lg:grid-cols-2'>
+        <IOPreview label='Input' value={observation.input} />
+        <IOPreview label='Output' value={observation.output} />
+      </div>
+      {(hasParams || hasMetadata) && (
+        <div className={cn(panelSurface, 'rounded-[4px] p-3')}>
+          <h4 className='mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-content-secondary'>
+            Attributes
+          </h4>
+          {hasParams && (
+            <pre className='max-h-40 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary'>
+              {prettyJson(observation.modelParameters)}
+            </pre>
+          )}
+          {hasMetadata && (
+            <pre
+              className={cn(
+                'max-h-40 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] text-content-secondary',
+                hasParams && 'mt-2',
+              )}
+            >
+              {prettyJson(observation.metadata)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function TraceDetailPage() {
   const { traceId } = useParams({ from: '/traces/$traceId' })
+  const { obs } = useSearch({ from: '/traces/$traceId' })
+  const navigate = useNavigate()
+  // `?obs=` is the single source of truth for selection (per-event
+  // deep-link). Params are passed explicitly — without them the
+  // navigate to /traces/undefined on leave or on a bare `search` update.
+  const selectedId = obs ?? 'trace'
+  const setSelectedId = (id: string) => {
+    void navigate({
+      to: '/traces/$traceId',
+      params: { traceId },
+      search: id === 'trace' ? {} : { obs: id },
+      replace: true,
+    })
+  }
   const traceQuery = useQuery({
     queryKey: ['trace', traceId],
     queryFn: () => getTrace(traceId),
     enabled: Boolean(traceId),
+    // Poll while any observation is still running.
+    refetchInterval: (query) =>
+      query.state.data?.observations?.some(observationIsPending) ? 3000 : false,
+  })
+  const scoresQuery = useQuery({
+    queryKey: ['scores', traceId],
+    queryFn: () => getScores({ traceId, limit: 200 }),
+    enabled: Boolean(traceId),
   })
   const trace = traceQuery.data
-  const observations = useMemo(
-    () =>
-      [...(trace?.observations ?? [])].sort(
-        (a, b) =>
-          new Date(a.startTime ?? a.timestamp ?? '').getTime() -
-          new Date(b.startTime ?? b.timestamp ?? '').getTime(),
-      ),
+  const scores = scoresQuery.data?.data ?? []
+
+  const roots = useMemo(
+    () => buildObservationTree(trace?.observations ?? []),
     [trace?.observations],
   )
-  const depths = useMemo(() => traceDepths(observations), [observations])
+  const timeWindow = useMemo(
+    () => traceWindow(roots, trace?.startTime ?? trace?.timestamp, trace?.endTime),
+    [roots, trace?.startTime, trace?.timestamp, trace?.endTime],
+  )
+  const observations = trace?.observations ?? []
+  const selected = useMemo(
+    () =>
+      selectedId === 'trace'
+        ? undefined
+        : observations.find((observation) => observation.id === selectedId),
+    [selectedId, observations],
+  )
+  const totalTokens = useMemo(() => {
+    const sum = observations.reduce(
+      (acc, observation) => acc + (observationTokens(observation).total ?? 0),
+      0,
+    )
+    return trace?.totalTokens ?? (sum > 0 ? sum : undefined)
+  }, [observations, trace?.totalTokens])
+  // Trace duration often isn't stored server-side — fall back to the
+  // observation window.
+  const traceDurationMs =
+    trace?.duration ?? trace?.latency ?? timeWindow.endMs - timeWindow.originMs
+
+  const exportTrace = () => {
+    if (!trace) return
+    const blob = new Blob([JSON.stringify({ ...trace, scores }, null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `trace-${trace.id}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
-    <div className='min-h-full bg-background-primary text-content-primary'>
+    <div className='flex min-h-full flex-col bg-background-primary text-content-primary'>
+      {/* ── header ─────────────────────────────────────────── */}
       <div className='border-b border-border-primary bg-background-primary px-4 py-4 sm:px-6'>
         <Link
           to='/traces'
@@ -328,153 +779,96 @@ export function TraceDetailPage() {
             </AlertAction>
           </Alert>
         ) : trace ? (
-          <>
-            <div className='flex flex-col justify-between gap-3 sm:flex-row sm:items-start'>
-              <div>
-                <div className='flex flex-wrap items-center gap-2'>
-                  <h1 className='max-w-2xl truncate text-xl font-semibold tracking-[-0.02em] text-content-primary'>
-                    {trace.name || 'Untitled trace'}
-                  </h1>
-                  <StatusChip status={trace.status} />
-                </div>
-                <p className='mt-1.5 flex items-center gap-2 font-mono text-[10px] text-content-tertiary'>
-                  <Hash className='size-3' />
-                  {trace.id}
-                </p>
+          <div className='flex flex-col justify-between gap-3 sm:flex-row sm:items-start'>
+            <div className='min-w-0'>
+              <div className='flex flex-wrap items-center gap-2'>
+                <h1 className='max-w-2xl truncate text-xl font-semibold tracking-[-0.02em] text-content-primary'>
+                  {trace.name || 'Untitled trace'}
+                </h1>
+                <StatusChip status={trace.status} />
+                <ScoreBadges scores={scores.filter((s) => !s.observationId)} />
               </div>
-              <div className='flex gap-2'>
-                <Button variant='outline' size='sm' className='rounded-[3px]'>
-                  <Star data-icon='inline-start' />
-                  Bookmark
-                </Button>
-                <Button variant='outline' size='sm' className='rounded-[3px]'>
-                  <FileText data-icon='inline-start' />
-                  Export
-                </Button>
-              </div>
+              <p className='mt-1.5 flex items-center gap-2 font-mono text-[10px] text-content-tertiary'>
+                <Hash className='size-3' />
+                {trace.id}
+              </p>
             </div>
-            <div className='mt-4'>
-              <TraceOverview trace={trace} />
-            </div>
-          </>
-        ) : null}
-      </div>
-      {trace && (
-        <div className='grid gap-5 px-4 py-5 sm:px-6 xl:grid-cols-[minmax(0,1fr)_280px]'>
-          <section>
-            <div className='mb-3 flex items-center justify-between'>
-              <div>
-                <h2 className='text-sm font-semibold text-content-primary'>Trace timeline</h2>
-                <p className='mt-0.5 text-[11px] text-content-secondary'>
-                  {observations.length} observation{observations.length === 1 ? '' : 's'} recorded
-                </p>
-              </div>
+            <div className='flex gap-2'>
+              <Button variant='outline' size='sm' className='rounded-[3px]' onClick={exportTrace}>
+                <Download data-icon='inline-start' />
+                Export
+              </Button>
               <Button
                 variant='ghost'
                 size='sm'
+                className='text-content-secondary'
                 onClick={() => void traceQuery.refetch()}
-                className='text-content-secondary hover:bg-interactive-secondary-hover hover:text-content-brand'
               >
                 <RefreshCw data-icon='inline-start' />
                 Refresh
               </Button>
             </div>
-            {observations.length === 0 ? (
+          </div>
+        ) : null}
+        {trace && (
+          <div className='mt-4'>
+            <MetricStrip className='grid-cols-2 sm:grid-cols-4'>
+              <MetricCell label='Duration' value={formatDuration(traceDurationMs)} />
+              <MetricCell
+                label='Observations'
+                value={trace.observationCount ?? observations.length}
+              />
+              <MetricCell label='Tokens' value={formatTokens(totalTokens)} />
+              <MetricCell label='Cost' value={formatCost(trace.totalCost)} />
+            </MetricStrip>
+          </div>
+        )}
+      </div>
+
+      {/* ── two-pane workspace ── */}
+      {trace && (
+        <div className='grid min-h-0 flex-1 gap-0 xl:grid-cols-[380px_minmax(0,1fr)]'>
+          <aside className='min-h-[320px] border-b border-border-primary bg-surface-primary xl:border-b-0 xl:border-r'>
+            <TraceNav
+              trace={trace}
+              roots={roots}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              timeWindow={timeWindow}
+              durationMs={traceDurationMs}
+            />
+          </aside>
+          <main className='min-w-0 px-4 py-4 sm:px-5'>
+            {observations.length === 0 && selectedId === 'trace' ? (
               <Card className={cn(panelSurface, 'p-0')}>
-                <EmptyState
-                  icon={<Activity className='size-4' />}
-                  title='No observations'
-                  description='This trace has been created, but no observations are attached yet.'
-                />
-              </Card>
-            ) : (
-              <div className='relative ml-4 pl-4'>
-                <Separator
-                  orientation='vertical'
-                  className='absolute inset-y-0 left-0 bg-border-primary'
-                />
-                {observations.map((observation) => (
-                  <TimelineItem
-                    key={observation.id}
-                    observation={observation}
-                    depth={depths.get(observation.id) ?? 0}
+                <CardContent className='p-0'>
+                  <EmptyState
+                    icon={<Activity className='size-4' />}
+                    title='No observations'
+                    description='This trace has been created, but no observations are attached yet.'
                   />
-                ))}
-              </div>
+                </CardContent>
+              </Card>
+            ) : selected ? (
+              <ObservationDetailView observation={selected} scores={scores} />
+            ) : (
+              <TraceDetailView
+                trace={trace}
+                scores={scores}
+                totalTokens={totalTokens}
+                durationMs={traceDurationMs}
+              />
             )}
-          </section>
-          <TraceSidebar trace={trace} />
+            {observations.length > 0 && (
+              <p className='mt-4 flex items-center gap-1.5 text-[10px] text-content-tertiary'>
+                <FileText className='size-3' />
+                {observations.length} observation{observations.length === 1 ? '' : 's'} · select a
+                node to inspect its input/output
+              </p>
+            )}
+          </main>
         </div>
       )}
     </div>
-  )
-}
-
-function TraceSidebar({ trace }: { trace: Trace }) {
-  const entries = [
-    { label: 'Project', value: trace.project, icon: Database },
-    { label: 'Session', value: trace.sessionId, icon: MessageSquare },
-    { label: 'User', value: trace.userId, icon: UserRound },
-    { label: 'Started', value: formatDate(trace.startTime ?? trace.timestamp), icon: Clock3 },
-    { label: 'Release', value: trace.release ?? trace.version, icon: GitBranch },
-  ]
-  return (
-    <aside className='flex flex-col gap-4'>
-      <Panel title='Trace details'>
-        <CardContent className='px-4 pb-3'>
-          <div className='flex flex-col'>
-            {entries.map(({ label, value, icon: Icon }, index) => (
-              <div key={label}>
-                <div className='flex items-start gap-2.5 py-2.5 first:pt-0 last:pb-0'>
-                  <Icon className='mt-0.5 size-3.5 shrink-0 text-content-secondary' />
-                  <div className='min-w-0'>
-                    <p className='font-mono text-[10px] uppercase tracking-[0.08em] text-content-tertiary'>
-                      {label}
-                    </p>
-                    <p className='mt-0.5 truncate text-xs text-content-primary'>{value || '—'}</p>
-                  </div>
-                </div>
-                {index < entries.length - 1 && <Separator className='bg-border-primary' />}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Panel>
-      {(trace.input !== undefined || trace.output !== undefined) && (
-        <Panel title='Trace input / output'>
-          <CardContent className='flex flex-col gap-3 px-3 pb-3'>
-            <DataBlock
-              label='Input'
-              value={trace.input}
-              copyKey='trace-input'
-              copied={null}
-              onCopy={() => undefined}
-            />
-            <DataBlock
-              label='Output'
-              value={trace.output}
-              copyKey='trace-output'
-              copied={null}
-              onCopy={() => undefined}
-            />
-          </CardContent>
-        </Panel>
-      )}
-      {trace.tags && trace.tags.length > 0 && (
-        <Panel title='Tags'>
-          <CardContent className='flex flex-wrap gap-1.5 px-4 pb-3'>
-            {trace.tags.map((tag) => (
-              <Badge
-                key={tag}
-                tone='neutral'
-                className='rounded-[3px] border-border-primary bg-surface-tertiary font-mono text-[10px] text-content-secondary'
-              >
-                {tag}
-              </Badge>
-            ))}
-          </CardContent>
-        </Panel>
-      )}
-    </aside>
   )
 }
