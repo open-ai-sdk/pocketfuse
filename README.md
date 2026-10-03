@@ -1,204 +1,52 @@
 # Pocketfuse
 
-Pocketfuse is a small, local tracing UI for AI agents and LLM applications.
-It runs as one Go process, serves the embedded React SPA, and stores data in a
-single SQLite file. There is no authentication or external database in the
-MVP, so it is intended for local development and trusted networks.
+A small, local tracing UI for AI agents and LLM applications. One Go process
+serves the embedded React SPA and stores everything in a single SQLite file —
+no auth, no external database, built for local development and trusted
+networks.
 
 Repository: <https://github.com/open-ai-sdk/pocketfuse>
+Docs: <https://open-ai-sdk.github.io/pocketfuse/>
 
 ## Quick start
 
-Requirements:
-
-- Go 1.26 or newer
-- Node.js 22 or newer and pnpm
-- No C toolchain: the SQLite driver is pure Go, so CGO is disabled
-
-From this directory:
+Requires Go 1.26+ and Node 22+ with pnpm. No C toolchain — the SQLite driver
+is pure Go.
 
 ```sh
-cp .env.example .env
-mkdir -p data
-set -a
-. ./.env
-set +a
-make run
+make run          # builds web/dist, compiles, runs on http://127.0.0.1:7625
 ```
 
-Open <http://127.0.0.1:7625>. `make run` builds `web/dist` before compiling so
-the Go `go:embed` step always includes the current frontend.
-
-To build and run an executable directly:
-
-```sh
-make build
-./bin/pocketfuse
-```
-
-For live reload while working on the Go backend, use
-[air](https://github.com/air-verse/air): `make dev` rebuilds and restarts the
-binary on `.go` changes (config in `.air.toml`). Run `pnpm --dir web run dev`
-in a second shell for the Vite dev server with hot reload; it proxies `/api`
-to the Go server on port 7625.
-
-The database is created at `./data/pocketfuse.db` in the example above. On a
-fresh checkout, the default path is `./pocketfuse.db` when
-`POCKETFUSE_DB_PATH` is unset. Parent directories are created by the server.
-
-## Configuration
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `POCKETFUSE_DB_PATH` | `./pocketfuse.db` | SQLite file path for a local binary. In Compose, use `/data/pocketfuse.db` (or another path under `/data`). |
-| `POCKETFUSE_HOST` | `127.0.0.1` | Address listened to by the HTTP server. Use `0.0.0.0` in a container or when another machine must reach it. |
-| `POCKETFUSE_PORT` | `7625` | HTTP port. |
-| `POCKETFUSE_DATA_DIR` | `./data` | Host directory bind-mounted to `/data` by Compose. |
-
-The Go process does not load `.env` automatically. Export variables in the
-shell, use `set -a; . ./.env; set +a`, or pass them inline:
-
-```sh
-POCKETFUSE_DB_PATH="$PWD/data/app.db" \
-POCKETFUSE_HOST=127.0.0.1 \
-POCKETFUSE_PORT=7625 \
-./bin/pocketfuse
-```
-
-## Docker & Compose
-
-The quickest path runs the published image from GHCR — Compose pulls
-`ghcr.io/open-ai-sdk/pocketfuse:latest` (multi-arch: amd64 + arm64) and wires
-the port, data volume, and healthcheck:
+Or run the published Docker image:
 
 ```sh
 mkdir -p data
-docker compose up -d        # pull + run; http://127.0.0.1:7625
-docker compose down         # stop; data remains in ./data
+docker compose up -d
 ```
 
-Plain `docker run` works too:
-
-```sh
-docker run -d --name pocketfuse -p 7625:7625 -v "$PWD/data:/data" \
-  ghcr.io/open-ai-sdk/pocketfuse:latest
-```
-
-Pin a version or change the host port / data directory with env vars:
-
-```sh
-POCKETFUSE_IMAGE=ghcr.io/open-ai-sdk/pocketfuse:1.2.3 \
-POCKETFUSE_PORT=9090 POCKETFUSE_DATA_DIR="$PWD/.pocketfuse-data" \
-  docker compose up -d
-```
-
-`POCKETFUSE_PORT` is the host port; the process always listens on 7625 inside
-the container, and `POCKETFUSE_DB_PATH` must resolve inside the container
-(normally `/data/pocketfuse.db`).
-
-**Development build**: the Dockerfile packages prebuilt artifacts only —
-`make docker-build` stages a context (`build/docker/`, GoReleaser's
-`linux/<arch>/pocketfuse` layout) and builds `pocketfuse:local`; `make
-docker-up` runs that local image through the same Compose file.
-
-On Linux, the image runs as the unprivileged `pocketfuse` user. If a bind
-mount was created with restrictive ownership, make the directory writable by
-the container user before starting it:
-
-```sh
-mkdir -p data
-sudo chown -R 10001:10001 data
-```
-
-## API and ingestion
-
-The MVP keeps the API small and stable so the UI can be replaced independently:
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `GET` | `/api/health` | Liveness and database status. |
-| `POST` | `/api/ingest` | Ingest a trace, observation, or a batch. |
-| `POST` | `/api/public/otel/v1/traces` | OTLP/HTTP trace ingestion (protobuf or JSON). |
-| `GET` | `/api/traces` | Paginated traces; supports `project`, `name`, `from`, `to`, `page`, and `limit`. |
-| `GET` | `/api/traces/:id` | A trace and its observations. |
-| `GET` | `/api/observations` | Paginated observations with filters. |
-| `GET` | `/api/sessions` | Session listing. |
-| `GET` | `/api/scores` | Score listing. |
-
-The JSON ingestion endpoint accepts either a batch or a trace with child
-observations. IDs and timestamps may be supplied by the caller; missing values
-are generated by the server. Existing IDs are upserted.
+Send your first trace:
 
 ```sh
 curl -fsS -X POST http://127.0.0.1:7625/api/ingest \
   -H 'content-type: application/json' \
-  --data-binary @- <<'JSON'
-{
-  "trace": {
-    "id": "local-trace-1",
-    "projectId": "demo",
-    "name": "demo.answer",
-    "input": {"question": "What should we build next?"},
-    "metadata": {"source": "local"}
-  },
-  "observations": [
-    {
-      "id": "local-generation-1",
-      "traceId": "local-trace-1",
-      "type": "GENERATION",
-      "name": "demo.answer",
-      "input": {"question": "What should we build next?"},
-      "output": {"answer": "..."},
-      "model": "local-model"
-    }
-  ]
-}
-JSON
+  -d '{"trace":{"id":"hello-1","projectId":"demo","name":"hello.trace"},"observations":[{"traceId":"hello-1","type":"GENERATION","name":"gen","model":"demo-model"}]}'
 ```
 
-The UI reads the same JSON API and is served from the root path. The frontend
-build output must stay at `web/dist`; the Go server embeds that directory and
-serves `index.html` for SPA routes.
-
-## Sending traces with OpenTelemetry
-
-Point any OTLP/HTTP exporter at the traces endpoint:
-
-```
-POST {base}/api/public/otel/v1/traces
-Content-Type: application/x-protobuf   # or application/json (OTLP JSON)
-```
-
-Example with standard OpenTelemetry environment variables:
-
-```sh
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:7625/api/public/otel/v1/traces
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_SERVICE_NAME=my-agent
-```
-
-Pocketfuse accepts but ignores authentication headers. Span attributes that
-follow common LLM-tracing conventions (`gen_ai.*` and related OTLP exporter
-vocabularies) are promoted onto trace and observation fields — name,
-input/output, model, usage, level; all other attributes are kept as
-observation metadata. `service.name` becomes the project name.
-
-When Pocketfuse and the instrumented app both run in Docker, use the Pocketfuse
-service name as the base URL (for example `http://pocketfuse:7625`) and keep
-both services on the same Compose network.
-
-## Development checks
-
-```sh
-make check       # frontend build, go test ./..., and go vet ./...
-make docker-build
-```
-
-The test suite is intentionally local and deterministic. No external services
-are required.
+Open <http://127.0.0.1:7625> — the trace appears under project `demo`.
 
 ## Documentation
 
-The full docs site lives in `docs/` (VitePress) and is published to GitHub
-Pages on every push to `main` that touches `docs/**`:
-<https://open-ai-sdk.github.io/pocketfuse/>. Local preview: `make docs-dev`.
+Everything else lives in the [docs site](https://open-ai-sdk.github.io/pocketfuse/)
+(sources in [`docs/`](./docs), local preview with `make docs-dev`):
+
+- [Getting started](https://open-ai-sdk.github.io/pocketfuse/guide/getting-started) —
+  run options, first traces
+- [Configuration](https://open-ai-sdk.github.io/pocketfuse/guide/configuration) —
+  `POCKETFUSE_*` environment variables
+- [Docker & Compose](https://open-ai-sdk.github.io/pocketfuse/guide/docker) —
+  published images, version pinning, local builds
+- [Ingesting traces](https://open-ai-sdk.github.io/pocketfuse/guide/ingestion) —
+  OpenTelemetry/OTLP and the JSON API
+- [HTTP API](https://open-ai-sdk.github.io/pocketfuse/api/) — endpoint reference
+- [Development](https://open-ai-sdk.github.io/pocketfuse/guide/development) —
+  live reload, checks, project layout
