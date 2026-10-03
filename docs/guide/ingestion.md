@@ -1,6 +1,6 @@
 # Ingesting traces
 
-Duckscope accepts two ingestion paths.
+Pocketfuse accepts two ingestion paths.
 
 ## OTLP/HTTP
 
@@ -12,7 +12,7 @@ Content-Type: application/x-protobuf   # or application/json (OTLP JSON)
 Point any OpenTelemetry exporter at it:
 
 ```sh
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:3825/api/public/otel/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:7625/api/public/otel/v1/traces
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_SERVICE_NAME=my-agent
 ```

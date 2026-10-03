@@ -1,4 +1,4 @@
-// Package store owns Duckscope's local persistence layer.
+// Package store owns Pocketfuse's local persistence layer.
 //
 // The database deliberately keeps the payload columns as JSON text. Ingested
 // OTLP and JSON payloads evolve quickly; preserving the original JSON makes
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/marcboeker/go-duckdb/v2"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 type Trace struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectId,omitempty"`
-	// Project is a UI-friendly alias used by Duckscope's lightweight client.
+	// Project is a UI-friendly alias used by Pocketfuse's lightweight client.
 	Project          string          `json:"project,omitempty"`
 	Name             string          `json:"name,omitempty"`
 	UserID           string          `json:"userId,omitempty"`
@@ -184,21 +184,21 @@ type IngestResult struct {
 	Scores       int `json:"scores"`
 }
 
-// Store wraps a single DuckDB database. DuckDB's local database engine is
-// optimized for analytic reads and permits a single writer, so the pool is
-// intentionally kept to one connection for predictable local ingestion.
+// Store wraps a single SQLite database. SQLite permits a single writer, so
+// the pool is intentionally kept to one connection for predictable local
+// ingestion.
 type Store struct {
 	db *sql.DB
 }
 
-// Open opens or creates a DuckDB database and applies the additive MVP schema.
+// Open opens or creates a SQLite database and applies the additive MVP schema.
 func Open(ctx context.Context, path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		path = ":memory:"
 	}
-	db, err := sql.Open("duckdb", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, fmt.Errorf("open duckdb: %w", err)
+		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
@@ -220,7 +220,7 @@ func New(path string) (*Store, error) {
 // applications that need to control the driver's lifecycle themselves.
 func NewStore(ctx context.Context, db *sql.DB) (*Store, error) {
 	if db == nil {
-		return nil, errors.New("duckscope store: nil database")
+		return nil, errors.New("pocketfuse store: nil database")
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
@@ -242,7 +242,17 @@ func (s *Store) Close() error {
 
 func (s *Store) init(ctx context.Context) error {
 	if err := s.db.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping duckdb: %w", err)
+		return fmt.Errorf("ping sqlite: %w", err)
+	}
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA foreign_keys=ON",
+	} {
+		if _, err := s.db.ExecContext(ctx, pragma); err != nil {
+			return fmt.Errorf("set pragma %q: %w", pragma, err)
+		}
 	}
 	for _, statement := range schemaStatements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -612,7 +622,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 // A tiny scanner helper keeps nullable JSON and strings consistent across the
-// list methods and makes the behavior of DuckDB's NULL values explicit.
+// list methods and makes the behavior of SQLite NULL values explicit.
 type nullableString struct {
 	String string
 	Valid  bool

@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/open-ai-sdk/duckscope/internal/server"
-	"github.com/open-ai-sdk/duckscope/internal/store"
+	"github.com/open-ai-sdk/pocketfuse/internal/server"
+	"github.com/open-ai-sdk/pocketfuse/internal/store"
 )
 
 func main() {
-	dbPath := env("DUCKSCOPE_DB_PATH", "./duckscope.db")
+	dbPath := env("POCKETFUSE_DB_PATH", "./pocketfuse.db")
 	if dbPath != ":memory:" {
 		if parent := filepath.Dir(dbPath); parent != "." && parent != "" {
 			if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -27,11 +27,11 @@ func main() {
 	ctx := context.Background()
 	db, err := store.Open(ctx, dbPath)
 	if err != nil {
-		log.Fatalf("open DuckDB: %v", err)
+		log.Fatalf("open sqlite: %v", err)
 	}
 	defer func() { _ = db.Close() }()
 
-	address := env("DUCKSCOPE_HOST", "127.0.0.1") + ":" + env("DUCKSCOPE_PORT", "3825")
+	address := env("POCKETFUSE_HOST", "127.0.0.1") + ":" + env("POCKETFUSE_PORT", "7625")
 	httpServer := &http.Server{Addr: address, Handler: server.New(db).Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 45 * time.Second, WriteTimeout: 45 * time.Second, IdleTimeout: 60 * time.Second}
 	shutdownCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -41,7 +41,7 @@ func main() {
 		defer cancel()
 		_ = httpServer.Shutdown(shutdown)
 	}()
-	log.Printf("duckscope listening on http://%s (db=%s)", address, dbPath)
+	log.Printf("pocketfuse listening on http://%s (db=%s)", address, dbPath)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

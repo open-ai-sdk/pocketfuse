@@ -6,7 +6,7 @@ export const Route = createFileRoute('/settings')({
   component: () => (
     <PlaceholderPage
       title='Settings'
-      description='Configure your local Duckscope workspace.'
+      description='Configure your local Pocketfuse workspace.'
       icon={Settings2}
     />
   ),

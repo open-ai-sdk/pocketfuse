@@ -201,7 +201,7 @@ func traceWhere(filter TraceFilter) (string, []any) {
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Name); value != "" {
-		conditions = append(conditions, "name ILIKE ?")
+		conditions = append(conditions, "name LIKE ?")
 		args = append(args, "%"+value+"%")
 	}
 	appendRange(&conditions, &args, "timestamp", filter.From, filter.To)
@@ -220,7 +220,7 @@ func observationWhere(filter ObservationFilter) (string, []any) {
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Name); value != "" {
-		conditions = append(conditions, "name ILIKE ?")
+		conditions = append(conditions, "name LIKE ?")
 		args = append(args, "%"+value+"%")
 	}
 	if value := strings.TrimSpace(filter.Type); value != "" {
@@ -239,7 +239,7 @@ func sessionWhere(filter SessionFilter) (string, []any) {
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Name); value != "" {
-		conditions = append(conditions, "name ILIKE ?")
+		conditions = append(conditions, "name LIKE ?")
 		args = append(args, "%"+value+"%")
 	}
 	if value := strings.TrimSpace(filter.UserID); value != "" {
@@ -262,7 +262,7 @@ func scoreWhere(filter ScoreFilter) (string, []any) {
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Name); value != "" {
-		conditions = append(conditions, "name ILIKE ?")
+		conditions = append(conditions, "name LIKE ?")
 		args = append(args, "%"+value+"%")
 	}
 	if value := strings.TrimSpace(filter.Source); value != "" {

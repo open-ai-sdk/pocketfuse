@@ -19,7 +19,7 @@ export default defineConfig({
   server: {
     port: 4173,
     proxy: {
-      '/api': 'http://localhost:3825',
+      '/api': 'http://localhost:7625',
     },
   },
   build: {

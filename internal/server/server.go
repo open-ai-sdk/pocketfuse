@@ -1,4 +1,4 @@
-// Package server implements Duckscope's small JSON API and embedded SPA
+// Package server implements Pocketfuse's small JSON API and embedded SPA
 // handler. It intentionally uses net/http so the binary has no web framework
 // runtime to configure.
 package server
@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-ai-sdk/duckscope/internal/store"
-	"github.com/open-ai-sdk/duckscope/web"
+	"github.com/open-ai-sdk/pocketfuse/internal/store"
+	"github.com/open-ai-sdk/pocketfuse/web"
 )
 
 const (
@@ -94,7 +94,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "database unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version, "storage": "duckdb"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version, "storage": "sqlite"})
 }
 
 func (s *Server) traces(w http.ResponseWriter, r *http.Request) {

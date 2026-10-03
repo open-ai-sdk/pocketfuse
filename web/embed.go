@@ -2,7 +2,7 @@
 //
 // The frontend build writes its Vite output to dist/. Keeping the embed point
 // in this small package lets the server stay independent of the frontend
-// implementation and also makes `go run ./cmd/duckscope` work from a checkout
+// implementation and also makes `go run ./cmd/pocketfuse` work from a checkout
 // that only contains the placeholder page.
 package web
 
