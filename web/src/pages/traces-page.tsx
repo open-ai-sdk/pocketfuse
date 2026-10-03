@@ -193,8 +193,8 @@ export function TracesPage() {
     const refresh = () => {
       void tracesQuery.refetch()
     }
-    window.addEventListener('duckscope:refresh', refresh)
-    return () => window.removeEventListener('duckscope:refresh', refresh)
+    window.addEventListener('pocketfuse:refresh', refresh)
+    return () => window.removeEventListener('pocketfuse:refresh', refresh)
   }, [tracesQuery.refetch])
 
   const traces = tracesQuery.data?.data ?? []
@@ -374,7 +374,7 @@ export function TracesPage() {
               description={
                 tracesQuery.error instanceof Error
                   ? tracesQuery.error.message
-                  : 'The local API is unavailable. Start Duckscope and try again.'
+                  : 'The local API is unavailable. Start Pocketfuse and try again.'
               }
               action={
                 <Button variant='outline' size='sm' onClick={() => void tracesQuery.refetch()}>
@@ -387,7 +387,7 @@ export function TracesPage() {
             <EmptyPanel
               icon={<Activity className='size-4' />}
               title='No traces yet'
-              description='Start sending traces to the local Duckscope API and they will appear here.'
+              description='Start sending traces to the local Pocketfuse API and they will appear here.'
               action={
                 <Button variant='outline' size='sm'>
                   <Plus data-icon='inline-start' />

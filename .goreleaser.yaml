@@ -1,6 +1,6 @@
 version: 2
 
-project_name: duckscope
+project_name: pocketfuse
 
 before:
   hooks:
@@ -11,22 +11,26 @@ before:
     - pnpm --dir ./web run build
 
 builds:
-  - id: duckscope
-    main: ./cmd/duckscope
-    binary: duckscope
+  - id: pocketfuse
+    main: ./cmd/pocketfuse
+    binary: pocketfuse
     env:
-      # go-duckdb requires CGO; cross-compiling it is not practical, so the
-      # binary release targets linux/amd64 only. Other platforms use the
-      # Docker image (built multi-arch by the release workflow).
-      - CGO_ENABLED=1
+      # modernc.org/sqlite is pure Go — cross-compiles to all targets.
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
     flags:
       - -trimpath
     goos:
+      - darwin
       - linux
+      - windows
     goarch:
       - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
 
 archives:
   - formats:
@@ -40,7 +44,7 @@ checksum:
 release:
   github:
     owner: open-ai-sdk
-    name: duckscope
+    name: pocketfuse
   draft: false
   prerelease: auto
   name_template: "v{{ .Version }}"

@@ -101,13 +101,13 @@ function Sidebar({
           to='/'
           onClick={onNavigate}
           className='flex min-w-0 items-center gap-2 overflow-hidden text-content-primary'
-          aria-label='Duckscope home'
+          aria-label='Pocketfuse home'
         >
           <span className='flex size-6 shrink-0 items-center justify-center rounded-md bg-interactive-primary text-xs font-semibold text-content-white shadow-sm'>
             D
           </span>
           {!collapsed && (
-            <span className='truncate text-sm font-medium tracking-tight'>duckscope</span>
+            <span className='truncate text-sm font-medium tracking-tight'>pocketfuse</span>
           )}
         </Link>
         <Button
@@ -162,7 +162,7 @@ function Sidebar({
               <span className='size-1.5 rounded-full bg-content-success' />
               Local project
             </div>
-            <p className='mt-1 pl-3.5 text-[11px] text-content-tertiary'>DuckDB · no auth</p>
+            <p className='mt-1 pl-3.5 text-[11px] text-content-tertiary'>SQLite · no auth</p>
           </Card>
         )}
         <nav className='flex flex-col gap-1' aria-label='Application'>
@@ -310,7 +310,7 @@ export function AppShell() {
       <div className='flex min-w-0 flex-1 flex-col'>
         <Topbar
           onMenu={() => setMobileOpen(true)}
-          onRefresh={() => window.dispatchEvent(new Event('duckscope:refresh'))}
+          onRefresh={() => window.dispatchEvent(new Event('pocketfuse:refresh'))}
         />
         <main key={router} className='min-h-0 flex-1 overflow-y-auto bg-background-primary'>
           <Outlet />

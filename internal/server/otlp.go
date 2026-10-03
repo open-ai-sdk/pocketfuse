@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-ai-sdk/duckscope/internal/store"
+	"github.com/open-ai-sdk/pocketfuse/internal/store"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
 	oteltrace "go.opentelemetry.io/proto/otlp/trace/v1"

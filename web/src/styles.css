@@ -6,7 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Duckscope keeps a small, semantic token vocabulary so pages can compose
+ * Pocketfuse keeps a small, semantic token vocabulary so pages can compose
  * shared primitives without reaching for one-off slate/gray values.
  */
 :root {

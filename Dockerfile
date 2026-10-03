@@ -4,9 +4,9 @@
 # (`pnpm --dir web build`, `make docker-build`, or CI's frontend job) —
 # this Dockerfile only packages artifacts, it does not build the SPA.
 
-# go-duckdb uses CGO; its prebuilt static libraries require glibc (fortify
-# __*_chk symbols), so the builder uses Debian instead of Alpine.
-FROM golang:1.25-bookworm AS backend
+# The SQLite driver (modernc.org/sqlite) is pure Go — no CGO, no libc, so
+# alpine works for both stages and cross-compiles cleanly.
+FROM golang:1.26-alpine AS backend
 
 WORKDIR /src
 
@@ -17,31 +17,29 @@ COPY . ./
 
 RUN test -f web/dist/index.html || (echo "web/dist is missing — run 'pnpm --dir web build' first" && exit 1)
 
-RUN CGO_ENABLED=1 go build \
+RUN CGO_ENABLED=0 go build \
     -trimpath \
     -ldflags='-s -w' \
-    -o /out/duckscope \
-    ./cmd/duckscope
+    -o /out/pocketfuse \
+    ./cmd/pocketfuse
 
 # Keep the runtime image small. /data is the only persistent mount required.
-FROM debian:bookworm-slim AS runtime
+FROM alpine:3.22 AS runtime
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 wget \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r -g 10001 duckscope \
-    && useradd -r -u 10001 -g duckscope duckscope \
+RUN apk add --no-cache ca-certificates wget \
+    && addgroup -S pocketfuse \
+    && adduser -S -u 10001 -G pocketfuse pocketfuse \
     && mkdir -p /data \
-    && chown duckscope:duckscope /data
+    && chown pocketfuse:pocketfuse /data
 
-COPY --from=backend /out/duckscope /usr/local/bin/duckscope
+COPY --from=backend /out/pocketfuse /usr/local/bin/pocketfuse
 
-ENV DUCKSCOPE_HOST=0.0.0.0 \
-    DUCKSCOPE_PORT=3825 \
-    DUCKSCOPE_DB_PATH=/data/duckscope.db
+ENV POCKETFUSE_HOST=0.0.0.0 \
+    POCKETFUSE_PORT=7625 \
+    POCKETFUSE_DB_PATH=/data/pocketfuse.db
 
 VOLUME ["/data"]
-EXPOSE 3825
+EXPOSE 7625
 
-USER duckscope
-ENTRYPOINT ["/usr/local/bin/duckscope"]
+USER pocketfuse
+ENTRYPOINT ["/usr/local/bin/pocketfuse"]

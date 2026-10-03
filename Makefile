@@ -1,15 +1,15 @@
 SHELL := /bin/sh
 
-APP_NAME ?= duckscope
+APP_NAME ?= pocketfuse
 BIN_DIR ?= bin
 FRONTEND_DIR ?= web
 GO ?= go
 PNPM ?= pnpm
 DOCKER ?= docker
 
-DUCKSCOPE_DB_PATH ?= ./data/duckscope.db
-DUCKSCOPE_HOST ?= 127.0.0.1
-DUCKSCOPE_PORT ?= 3825
+POCKETFUSE_DB_PATH ?= ./data/pocketfuse.db
+POCKETFUSE_HOST ?= 127.0.0.1
+POCKETFUSE_PORT ?= 7625
 
 .PHONY: frontend-install frontend-build build run dev test vet check \
 	docker-build docker-up docker-down docs-dev docs-build clean
@@ -26,13 +26,13 @@ frontend-build: frontend-install
 
 build: frontend-build
 	@mkdir -p "$(BIN_DIR)"
-	CGO_ENABLED=1 $(GO) build -trimpath -ldflags='-s -w' -o "$(BIN_DIR)/$(APP_NAME)" ./cmd/duckscope
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags='-s -w' -o "$(BIN_DIR)/$(APP_NAME)" ./cmd/pocketfuse
 
 run: frontend-build
-	DUCKSCOPE_DB_PATH="$(DUCKSCOPE_DB_PATH)" \
-	DUCKSCOPE_HOST="$(DUCKSCOPE_HOST)" \
-	DUCKSCOPE_PORT="$(DUCKSCOPE_PORT)" \
-	CGO_ENABLED=1 $(GO) run ./cmd/duckscope
+	POCKETFUSE_DB_PATH="$(POCKETFUSE_DB_PATH)" \
+	POCKETFUSE_HOST="$(POCKETFUSE_HOST)" \
+	POCKETFUSE_PORT="$(POCKETFUSE_PORT)" \
+	CGO_ENABLED=0 $(GO) run ./cmd/pocketfuse
 
 dev:
 	air -c .air.toml

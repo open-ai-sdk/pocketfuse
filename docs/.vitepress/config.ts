@@ -1,13 +1,13 @@
 import { defineConfig } from 'vitepress'
 
 // Deployed to GitHub Pages under the repository name.
-const base = process.env.DOCS_BASE || '/duckscope/'
+const base = process.env.DOCS_BASE || '/pocketfuse/'
 
 export default defineConfig({
   lang: 'en-US',
-  title: 'Duckscope',
+  title: 'Pocketfuse',
   description:
-    'Local-first LLM tracing UI: one Go binary, embedded React SPA, DuckDB storage, OTLP/HTTP ingestion.',
+    'Local-first LLM tracing UI: one Go binary, embedded React SPA, SQLite storage, OTLP/HTTP ingestion.',
   base,
 
   // API examples reference localhost services that are not navigable from
@@ -20,7 +20,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'API', link: '/api/' },
-      { text: 'GitHub', link: 'https://github.com/open-ai-sdk/duckscope' },
+      { text: 'GitHub', link: 'https://github.com/open-ai-sdk/pocketfuse' },
     ],
     sidebar: [
       {
@@ -40,9 +40,9 @@ export default defineConfig({
         ],
       },
     ],
-    socialLinks: [{ icon: 'github', link: 'https://github.com/open-ai-sdk/duckscope' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/open-ai-sdk/pocketfuse' }],
     editLink: {
-      pattern: 'https://github.com/open-ai-sdk/duckscope/edit/main/docs/:path',
+      pattern: 'https://github.com/open-ai-sdk/pocketfuse/edit/main/docs/:path',
       text: 'Edit this page on GitHub',
     },
     search: { provider: 'local' },

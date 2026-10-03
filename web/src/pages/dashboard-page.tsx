@@ -34,7 +34,7 @@ export function DashboardPage() {
       <PageHeader
         eyebrow='Workspace'
         title='Overview'
-        description='A focused view of activity in this local DuckDB project.'
+        description='A focused view of activity in this local SQLite project.'
         actions={
           <Button
             render={<Link to='/traces' />}
@@ -69,7 +69,7 @@ export function DashboardPage() {
           <MetricCell
             icon={Database}
             label='Storage'
-            value='DuckDB'
+            value='SQLite'
             detail='Embedded and portable'
           />
         </MetricStrip>
@@ -153,7 +153,7 @@ export function DashboardPage() {
               <StartStep
                 number='01'
                 icon={TerminalSquare}
-                title='Start Duckscope'
+                title='Start Pocketfuse'
                 description='Run the single binary locally.'
               />
               <StartStep
@@ -183,7 +183,7 @@ export function DashboardPage() {
 
         <div className='flex items-center gap-2 text-[11px] text-content-tertiary'>
           <CheckCircle2 className='size-3.5 text-content-success' />
-          Local collector ready. Data stays in the configured DuckDB file.
+          Local collector ready. Data stays in the configured SQLite file.
         </div>
       </div>
     </div>

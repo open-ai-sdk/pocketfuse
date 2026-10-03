@@ -1,19 +1,19 @@
-# Duckscope
+# Pocketfuse
 
-Duckscope is a small, local tracing UI for AI agents and LLM applications.
+Pocketfuse is a small, local tracing UI for AI agents and LLM applications.
 It runs as one Go process, serves the embedded React SPA, and stores data in a
-single DuckDB file. There is no authentication or external database in the
+single SQLite file. There is no authentication or external database in the
 MVP, so it is intended for local development and trusted networks.
 
-Repository: <https://github.com/open-ai-sdk/duckscope>
+Repository: <https://github.com/open-ai-sdk/pocketfuse>
 
 ## Quick start
 
 Requirements:
 
-- Go 1.25 or newer
+- Go 1.26 or newer
 - Node.js 22 or newer and pnpm
-- CGO support (a C compiler is required by the DuckDB driver)
+- No C toolchain: the SQLite driver is pure Go, so CGO is disabled
 
 From this directory:
 
@@ -26,43 +26,43 @@ set +a
 make run
 ```
 
-Open <http://127.0.0.1:3825>. `make run` builds `web/dist` before compiling so
+Open <http://127.0.0.1:7625>. `make run` builds `web/dist` before compiling so
 the Go `go:embed` step always includes the current frontend.
 
 To build and run an executable directly:
 
 ```sh
 make build
-./bin/duckscope
+./bin/pocketfuse
 ```
 
 For live reload while working on the Go backend, use
 [air](https://github.com/air-verse/air): `make dev` rebuilds and restarts the
 binary on `.go` changes (config in `.air.toml`). Run `pnpm --dir web run dev`
 in a second shell for the Vite dev server with hot reload; it proxies `/api`
-to the Go server on port 3825.
+to the Go server on port 7625.
 
-The database is created at `./data/duckscope.db` in the example above. On a
-fresh checkout, the default path is `./duckscope.db` when
-`DUCKSCOPE_DB_PATH` is unset. Parent directories are created by the server.
+The database is created at `./data/pocketfuse.db` in the example above. On a
+fresh checkout, the default path is `./pocketfuse.db` when
+`POCKETFUSE_DB_PATH` is unset. Parent directories are created by the server.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DUCKSCOPE_DB_PATH` | `./duckscope.db` | DuckDB file path for a local binary. In Compose, use `/data/duckscope.db` (or another path under `/data`). |
-| `DUCKSCOPE_HOST` | `127.0.0.1` | Address listened to by the HTTP server. Use `0.0.0.0` in a container or when another machine must reach it. |
-| `DUCKSCOPE_PORT` | `3825` | HTTP port. |
-| `DUCKSCOPE_DATA_DIR` | `./data` | Host directory bind-mounted to `/data` by Compose. |
+| `POCKETFUSE_DB_PATH` | `./pocketfuse.db` | SQLite file path for a local binary. In Compose, use `/data/pocketfuse.db` (or another path under `/data`). |
+| `POCKETFUSE_HOST` | `127.0.0.1` | Address listened to by the HTTP server. Use `0.0.0.0` in a container or when another machine must reach it. |
+| `POCKETFUSE_PORT` | `7625` | HTTP port. |
+| `POCKETFUSE_DATA_DIR` | `./data` | Host directory bind-mounted to `/data` by Compose. |
 
 The Go process does not load `.env` automatically. Export variables in the
 shell, use `set -a; . ./.env; set +a`, or pass them inline:
 
 ```sh
-DUCKSCOPE_DB_PATH="$PWD/data/app.db" \
-DUCKSCOPE_HOST=127.0.0.1 \
-DUCKSCOPE_PORT=3825 \
-./bin/duckscope
+POCKETFUSE_DB_PATH="$PWD/data/app.db" \
+POCKETFUSE_HOST=127.0.0.1 \
+POCKETFUSE_PORT=7625 \
+./bin/pocketfuse
 ```
 
 ## Docker Compose
@@ -70,28 +70,28 @@ DUCKSCOPE_PORT=3825 \
 The Dockerfile packages artifacts only — build the frontend first
 (`pnpm --dir web run build` or `make docker-build`, which does both). The
 resulting image contains one executable; the host data directory is
-bind-mounted so removing the container does not remove the DuckDB file.
+bind-mounted so removing the container does not remove the SQLite file.
 
 ```sh
 mkdir -p data
 make docker-up        # builds web/dist first, then docker compose up --build
 ```
 
-Open <http://127.0.0.1:3825>. Stop it with `Ctrl-C`; use `docker compose down`
+Open <http://127.0.0.1:7625>. Stop it with `Ctrl-C`; use `docker compose down`
 to remove the container. Data remains in `./data`.
 
 To use another host port or data directory:
 
 ```sh
-DUCKSCOPE_PORT=9090 DUCKSCOPE_DATA_DIR="$PWD/.duckscope-data" \
+POCKETFUSE_PORT=9090 POCKETFUSE_DATA_DIR="$PWD/.pocketfuse-data" \
   make docker-up
 ```
 
-`DUCKSCOPE_PORT` is the host port in Compose. The process listens on port 3825
-inside the container. `DUCKSCOPE_DB_PATH` must point to a path visible inside
-the container, normally `/data/duckscope.db`.
+`POCKETFUSE_PORT` is the host port in Compose. The process listens on port 7625
+inside the container. `POCKETFUSE_DB_PATH` must point to a path visible inside
+the container, normally `/data/pocketfuse.db`.
 
-On Linux, the image runs as the unprivileged `duckscope` user. If a bind mount
+On Linux, the image runs as the unprivileged `pocketfuse` user. If a bind mount
 was created with restrictive ownership, make the directory writable by the
 container user before starting it:
 
@@ -120,7 +120,7 @@ observations. IDs and timestamps may be supplied by the caller; missing values
 are generated by the server. Existing IDs are upserted.
 
 ```sh
-curl -fsS -X POST http://127.0.0.1:3825/api/ingest \
+curl -fsS -X POST http://127.0.0.1:7625/api/ingest \
   -H 'content-type: application/json' \
   --data-binary @- <<'JSON'
 {
@@ -162,19 +162,19 @@ Content-Type: application/x-protobuf   # or application/json (OTLP JSON)
 Example with standard OpenTelemetry environment variables:
 
 ```sh
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:3825/api/public/otel/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:7625/api/public/otel/v1/traces
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_SERVICE_NAME=my-agent
 ```
 
-Duckscope accepts but ignores authentication headers. Span attributes that
+Pocketfuse accepts but ignores authentication headers. Span attributes that
 follow common LLM-tracing conventions (`gen_ai.*` and related OTLP exporter
 vocabularies) are promoted onto trace and observation fields — name,
 input/output, model, usage, level; all other attributes are kept as
 observation metadata. `service.name` becomes the project name.
 
-When Duckscope and the instrumented app both run in Docker, use the Duckscope
-service name as the base URL (for example `http://duckscope:3825`) and keep
+When Pocketfuse and the instrumented app both run in Docker, use the Pocketfuse
+service name as the base URL (for example `http://pocketfuse:7625`) and keep
 both services on the same Compose network.
 
 ## Development checks
@@ -191,4 +191,4 @@ are required.
 
 The full docs site lives in `docs/` (VitePress) and is published to GitHub
 Pages on every push to `main` that touches `docs/**`:
-<https://open-ai-sdk.github.io/duckscope/>. Local preview: `make docs-dev`.
+<https://open-ai-sdk.github.io/pocketfuse/>. Local preview: `make docs-dev`.

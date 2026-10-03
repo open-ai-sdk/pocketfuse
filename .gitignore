@@ -15,12 +15,14 @@
 cover.out
 coverage.out
 
-# DuckDB local databases and sidecar files
+# SQLite local databases and sidecar files
 *.db
 *.db.wal
-*.duckdb
-*.duckdb.wal
-*.duckdb.tmp
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite.tmp
 /data/
 
 # Air live-reload scratch dir

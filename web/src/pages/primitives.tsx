@@ -5,7 +5,7 @@ import { Link } from '@tanstack/react-router'
 import { Badge, Card, CardDescription, CardHeader, CardTitle, EmptyState } from '../components/ui'
 import { cn } from '../lib/utils'
 
-/** Shared visual tokens for Duckscope surfaces, expressed with Tailwind. */
+/** Shared visual tokens for Pocketfuse surfaces, expressed with Tailwind. */
 export const panelSurface =
   'rounded-[4px] border border-border-primary bg-surface-primary shadow-none ring-0'
 export const panelSubtle = 'border-border-primary bg-surface-tertiary'

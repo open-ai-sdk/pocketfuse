@@ -1,6 +1,6 @@
 # HTTP API
 
-Base URL: `http://127.0.0.1:3825` (default). All endpoints are unauthenticated.
+Base URL: `http://127.0.0.1:7625` (default). All endpoints are unauthenticated.
 
 ## Endpoints
 
@@ -24,20 +24,20 @@ List responses are `{data: [...], total, page, limit}`. Writes return
 Health:
 
 ```sh
-curl http://127.0.0.1:3825/api/health
-# {"status":"ok","storage":"duckdb","version":"0.1.0"}
+curl http://127.0.0.1:7625/api/health
+# {"status":"ok","storage":"sqlite","version":"0.1.0"}
 ```
 
 List traces of one project:
 
 ```sh
-curl 'http://127.0.0.1:3825/api/traces?project=demo&limit=10'
+curl 'http://127.0.0.1:7625/api/traces?project=demo&limit=10'
 ```
 
 Ingest a score on an existing trace:
 
 ```sh
-curl -X POST http://127.0.0.1:3825/api/ingest \
+curl -X POST http://127.0.0.1:7625/api/ingest \
   -H 'content-type: application/json' \
   -d '{"name":"accuracy","value":0.87,"traceId":"hello-1","dataType":"NUMERIC"}'
 ```

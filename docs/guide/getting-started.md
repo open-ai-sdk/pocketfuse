@@ -1,13 +1,13 @@
 # Getting started
 
-Duckscope is a local tracing UI for AI agents and LLM applications. It runs as
+Pocketfuse is a local tracing UI for AI agents and LLM applications. It runs as
 one Go process, serves an embedded React SPA, and stores everything in a single
-DuckDB file. There is **no authentication** — use it on localhost or trusted
+SQLite file. There is **no authentication** — use it on localhost or trusted
 networks only.
 
 ## Requirements
 
-- Go 1.25+ with CGO (a C compiler — required by the DuckDB driver)
+- Go 1.26+ (CGO and a C compiler are not required — the SQLite driver is pure Go)
 - Node.js 22+ and pnpm (frontend build only)
 
 ## Run locally
@@ -19,14 +19,14 @@ set -a; . ./.env; set +a
 make run
 ```
 
-Open <http://127.0.0.1:3825>.
+Open <http://127.0.0.1:7625>.
 
 `make run` builds `web/dist` first so the Go `go:embed` step always ships the
 current frontend. For a standalone binary:
 
 ```sh
 make build
-./bin/duckscope
+./bin/pocketfuse
 ```
 
 ## Run with Docker
@@ -41,7 +41,7 @@ Data persists in `./data` (bind-mounted to `/data` in the container).
 ## Send your first trace
 
 ```sh
-curl -fsS -X POST http://127.0.0.1:3825/api/ingest \
+curl -fsS -X POST http://127.0.0.1:7625/api/ingest \
   -H 'content-type: application/json' \
   -d '{
     "trace": {

@@ -16,7 +16,7 @@ pnpm --dir web run dev
 ```
 
 Vite dev server on <http://localhost:4173> — proxies `/api` to the Go server on
-port 3825, with hot reload. Frontend checks use
+port 7625, with hot reload. Frontend checks use
 [vite-plus](https://viteplus.dev):
 
 ```sh
@@ -36,15 +36,15 @@ make check   # frontend build, go test ./..., go vet ./...
 | Workflow | Trigger | Jobs |
 |---|---|---|
 | `ci.yml` | push/PR to `main` | golangci-lint · `go test -race` · frontend `vp check`+tsc+test · goreleaser snapshot |
-| `release.yml` | tag `v*` | goreleaser binaries + GitHub release · docker → `ghcr.io/open-ai-sdk/duckscope` (amd64+arm64) |
+| `release.yml` | tag `v*` | goreleaser binaries + GitHub release · docker → `ghcr.io/open-ai-sdk/pocketfuse` (amd64+arm64) |
 | `docs.yml` | push to `main` touching `docs/**` | vitepress build → GitHub Pages |
 
 ## Project layout
 
 ```
-cmd/duckscope        main entry
+cmd/pocketfuse        main entry
 internal/server      HTTP API + OTLP decoding
-internal/store       DuckDB persistence
+internal/store       SQLite persistence
 web/                 React SPA (TanStack Router/Query/Table, tailwind, vite-plus)
 docs/                This site (VitePress)
 ```

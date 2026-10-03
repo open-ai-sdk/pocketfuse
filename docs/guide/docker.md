@@ -5,7 +5,7 @@ The Dockerfile **packages artifacts only** — build the frontend first so
 in a separate job before the image build).
 
 ```sh
-make docker-build          # pnpm --dir web build + docker build -t duckscope:local
+make docker-build          # pnpm --dir web build + docker build -t pocketfuse:local
 make docker-up             # frontend build + docker compose up --build
 make docker-down
 ```
@@ -13,29 +13,29 @@ make docker-down
 ## Compose layout
 
 ```yaml
-duckscope:
+pocketfuse:
   build: .
-  ports: ["${DUCKSCOPE_PORT:-3825}:3825"]
-  volumes: ["${DUCKSCOPE_DATA_DIR:-./data}:/data"]
+  ports: ["${POCKETFUSE_PORT:-7625}:7625"]
+  volumes: ["${POCKETFUSE_DATA_DIR:-./data}:/data"]
 ```
 
-The process listens on **3825** inside the container. `DUCKSCOPE_PORT` is the
-host port. `DUCKSCOPE_DB_PATH` must resolve inside the container — normally
-`/data/duckscope.db`.
+The process listens on **7625** inside the container. `POCKETFUSE_PORT` is the
+host port. `POCKETFUSE_DB_PATH` must resolve inside the container — normally
+`/data/pocketfuse.db`.
 
 Custom port/data dir:
 
 ```sh
-DUCKSCOPE_PORT=4000 DUCKSCOPE_DATA_DIR="$PWD/.duckscope-data" make docker-up
+POCKETFUSE_PORT=4000 POCKETFUSE_DATA_DIR="$PWD/.pocketfuse-data" make docker-up
 ```
 
 ## Multi-arch images
 
-Tagged releases (`v*`) build and push `ghcr.io/open-ai-sdk/duckscope` for
+Tagged releases (`v*`) build and push `ghcr.io/open-ai-sdk/pocketfuse` for
 `linux/amd64` and `linux/arm64`. Pull the matching tag:
 
 ```sh
-docker pull ghcr.io/open-ai-sdk/duckscope:latest
+docker pull ghcr.io/open-ai-sdk/pocketfuse:latest
 ```
 
 ## Unprivileged user
