@@ -115,22 +115,24 @@ func (s *Store) unlinkedDuring(ctx context.Context, traces []Trace) ([]Trace, er
 		if traces[position].hasGeneration || !startOK || !endOK {
 			continue
 		}
-		// One query per request: a thread can span days, and a single range
-		// would hit the row cap before reaching its later requests.
-		candidates, err := s.tracesStartingBetween(ctx, start, end, " AND session_id = ''")
-		if err != nil {
-			return nil, err
-		}
-		for _, candidate := range candidates {
-			candidateStart, ok := parseTimestamp(candidate.StartTime)
-			if !ok || seen[candidate.ID] || candidateStart.Before(start) || candidateStart.After(end) {
-				continue
+		// Keep each query inside one request window: a thread may span days.
+		// Page through every candidate before moving to its later requests.
+		for page := 0; ; page++ {
+			candidates, err := s.tracesStartingBetweenPage(ctx, start, end, " AND session_id = ''", page)
+			if err != nil {
+				return nil, err
 			}
-			seen[candidate.ID] = true
-			unlinked = append(unlinked, candidate)
-		}
-		if len(unlinked) >= maxSessionTraces {
-			break
+			for _, candidate := range candidates {
+				candidateStart, ok := parseTimestamp(candidate.StartTime)
+				if !ok || seen[candidate.ID] || candidateStart.Before(start) || candidateStart.After(end) {
+					continue
+				}
+				seen[candidate.ID] = true
+				unlinked = append(unlinked, candidate)
+			}
+			if len(candidates) < maxSessionTraces {
+				break
+			}
 		}
 	}
 	sortChronologically(unlinked)
@@ -185,16 +187,20 @@ func (s *Store) GetRelatedTraces(ctx context.Context, id string) (*RelatedTraces
 // Stored timestamps drop trailing zeros and so compare only roughly as text;
 // the bounds are widened here and callers apply the exact check.
 func (s *Store) tracesStartingBetween(ctx context.Context, from, to time.Time, condition string) ([]Trace, error) {
+	return s.tracesStartingBetweenPage(ctx, from, to, condition, 0)
+}
+
+func (s *Store) tracesStartingBetweenPage(ctx context.Context, from, to time.Time, condition string, page int) ([]Trace, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, name, user_id, session_id, environment, release, version,
 		       input, output, metadata, tags, public, timestamp, start_time, end_time,
 		       created_at, updated_at
 		FROM traces
 		WHERE timestamp >= ? AND timestamp <= ? AND `+noiseExclusion+condition+`
-		ORDER BY timestamp ASC, id ASC LIMIT ?`,
+		ORDER BY timestamp ASC, id ASC LIMIT ? OFFSET ?`,
 		from.Add(-time.Second).UTC().Format(time.RFC3339Nano),
 		to.Add(time.Second).UTC().Format(time.RFC3339Nano),
-		maxSessionTraces)
+		maxSessionTraces, page*maxSessionTraces)
 	if err != nil {
 		return nil, fmt.Errorf("list traces in window: %w", err)
 	}

@@ -136,7 +136,7 @@ func (s *Server) traces(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/traces")
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/traces")
 	if path != "" && path != "/" {
 		rawID, wantRelated := strings.CutSuffix(strings.TrimPrefix(path, "/"), "/related")
 		id, err := url.PathUnescape(rawID)
@@ -198,7 +198,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	if path := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/api/sessions"), "/"); path != "" {
+	if path := strings.TrimPrefix(strings.TrimPrefix(r.URL.EscapedPath(), "/api/sessions"), "/"); path != "" {
 		rawID, wantStory := strings.CutSuffix(path, "/story")
 		id, err := url.PathUnescape(rawID)
 		if err != nil || id == "" {

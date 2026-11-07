@@ -96,7 +96,7 @@ func recordsFromOTLP(request *collectortrace.ExportTraceServiceRequest) []store.
 				}
 				group := groups[traceID]
 				if group == nil {
-					group = &traceGroup{trace: store.Trace{ID: traceID, ProjectID: project, Project: project, CreatedAt: now(), Partial: true}, metadata: map[string]any{}}
+					group = &traceGroup{trace: store.Trace{ID: traceID, ProjectID: project, Project: project, CreatedAt: now(), Partial: true, ProvisionalTimestamp: true}, metadata: map[string]any{}}
 					groups[traceID] = group
 					order = append(order, traceID)
 				}
@@ -110,6 +110,7 @@ func recordsFromOTLP(request *collectortrace.ExportTraceServiceRequest) []store.
 				}
 				if isRoot {
 					group.trace.Partial = false
+					group.trace.ProvisionalTimestamp = false
 				}
 				if explicit := spanAttrs["langfuse.trace.name"]; explicit != "" {
 					group.trace.Name = explicit
@@ -128,7 +129,9 @@ func recordsFromOTLP(request *collectortrace.ExportTraceServiceRequest) []store.
 					group.trace.Timestamp = first(start, group.trace.Timestamp)
 					group.trace.StartTime = first(start, group.trace.StartTime)
 					group.trace.EndTime = first(end, group.trace.EndTime)
-					group.trace.Input = valueJSON(firstAny(spanAttrs, "langfuse.trace.input", "langfuse.observation.input"))
+					if value := valueJSON(firstAny(spanAttrs, "langfuse.trace.input", "langfuse.observation.input")); value != nil {
+						group.trace.Input = value
+					}
 					group.trace.Output = valueJSON(firstAny(spanAttrs, "langfuse.trace.output", "langfuse.observation.output"))
 				} else {
 					// Trace-level attributes may be set on any span of the trace.
@@ -168,6 +171,7 @@ func recordsFromOTLP(request *collectortrace.ExportTraceServiceRequest) []store.
 		records = append(records, store.IngestRecord{Type: store.RecordTrace, Trace: &group.trace})
 		for index := range group.obs {
 			observation := group.obs[index]
+			observation.ProjectID = group.trace.ProjectID
 			records = append(records, store.IngestRecord{Type: store.RecordObservation, Observation: &observation})
 		}
 	}
@@ -350,8 +354,16 @@ func errorEventMessage(events []*oteltrace.Span_Event) string {
 func usageJSON(values map[string]string) json.RawMessage {
 	usage := map[string]any{}
 	for key, value := range values {
-		if key == "langfuse.observation.usage_details" || strings.HasPrefix(key, "gen_ai.usage.") {
+		switch key {
+		case "input", "promptTokens", "prompt_tokens",
+			"output", "completionTokens", "completion_tokens",
+			"total", "totalTokens", "total_tokens",
+			"cached_input", "cache_creation_input", "reasoning", "tool_use_prompt":
 			usage[key] = parseStringOrJSON(value)
+		default:
+			if key == "langfuse.observation.usage_details" || strings.HasPrefix(key, "gen_ai.usage.") {
+				usage[key] = parseStringOrJSON(value)
+			}
 		}
 	}
 	if len(usage) == 0 {

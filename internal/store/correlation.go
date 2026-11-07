@@ -92,12 +92,12 @@ func routeParameter(route, path, name string) string {
 	return ""
 }
 
-// backfillVersion is the PRAGMA user_version recorded once existing rows carry
-// correlation. Spans ingested before correlation existed still hold the
-// attributes in their metadata, so the links can be recovered without resending.
+// Correlation version 3 reruns the original backfill for databases whose first
+// migration skipped observations carrying only user_id.
 const (
-	backfillVersion  = 1
-	timestampVersion = 2
+	backfillVersion        = 3
+	legacyTimestampVersion = 2
+	timestampVersion       = 4
 )
 
 func (s *Store) backfillCorrelation(ctx context.Context) error {
@@ -153,7 +153,7 @@ func (s *Store) repairTraceTimestamps(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version >= timestampVersion {
+	if version >= legacyTimestampVersion {
 		return nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -173,7 +173,7 @@ func (s *Store) repairTraceTimestamps(ctx context.Context) error {
 		WHERE EXISTS (SELECT 1 FROM traces WHERE session_id = sessions.id)`); err != nil {
 		return fmt.Errorf("repair session start: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", timestampVersion)); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", legacyTimestampVersion)); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -182,10 +182,44 @@ func (s *Store) repairTraceTimestamps(ctx context.Context) error {
 	return nil
 }
 
+// migrateTraceTimestampAuthority records provenance for new rootless OTLP
+// batches. Legacy rows have no reliable provenance: even a timestamp equal to a
+// child's start may have been explicitly supplied, so they remain authoritative.
+func (s *Store) migrateTraceTimestampAuthority(ctx context.Context) error {
+	var version int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if version >= timestampVersion {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin timestamp authority migration: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var columns int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('traces') WHERE name = 'timestamp_provisional'`).Scan(&columns); err != nil {
+		return fmt.Errorf("read timestamp authority column: %w", err)
+	}
+	if columns == 0 {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE traces ADD COLUMN timestamp_provisional BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+			return fmt.Errorf("add timestamp authority column: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", timestampVersion)); err != nil {
+		return fmt.Errorf("record schema version: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit timestamp authority migration: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) correlationsFromStoredSpans(ctx context.Context) (map[string]Correlation, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT trace_id, metadata FROM observations
-		WHERE metadata LIKE '%thread_id%' OR metadata LIKE '%job_id%'`)
+		WHERE metadata LIKE '%thread_id%' OR metadata LIKE '%job_id%' OR metadata LIKE '%user_id%'`)
 	if err != nil {
 		return nil, fmt.Errorf("scan spans for correlation: %w", err)
 	}

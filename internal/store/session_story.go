@@ -3,10 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // SessionStory is one session read as a continuous conversation: turns in start
@@ -188,14 +192,70 @@ func linkSpawnedJobs(turns []*Turn, jobs map[string]*Turn) {
 				if call.rawResult == "" {
 					continue
 				}
+				var result, trailing any
+				decoder := json.NewDecoder(strings.NewReader(call.rawResult))
+				decoder.UseNumber()
+				if err := decoder.Decode(&result); err != nil {
+					result = call.rawResult
+				} else if err := decoder.Decode(&trailing); err != io.EOF {
+					result = call.rawResult
+				}
 				for jobID, job := range jobs {
-					if job != turn && job.SpawnedBy == nil && strings.Contains(call.rawResult, jobID) {
+					if job != turn && job.SpawnedBy == nil && resultNamesJob(result, jobID) {
 						job.SpawnedBy = &TurnLink{TraceID: turn.TraceID, ObservationID: step.ObservationID, Tool: call.Name}
 					}
 				}
 			}
 		}
 	}
+}
+
+// resultNamesJob accepts recorded identifiers in text or JSON, including JSON
+// escapes, without mistaking one job's identifier for a prefix of another.
+func resultNamesJob(result any, jobID string) bool {
+	switch value := result.(type) {
+	case json.Number:
+		return resultNamesJob(value.String(), jobID)
+	case bool:
+		if value {
+			return resultNamesJob("true", jobID)
+		}
+		return resultNamesJob("false", jobID)
+	case nil:
+		return resultNamesJob("null", jobID)
+	case string:
+		for offset := 0; offset < len(value); {
+			position := strings.Index(value[offset:], jobID)
+			if position < 0 {
+				return false
+			}
+			start := offset + position
+			end := start + len(jobID)
+			before, _ := utf8.DecodeLastRuneInString(value[:start])
+			after, _ := utf8.DecodeRuneInString(value[end:])
+			if (start == 0 || !jobIdentifierRune(before)) && (end == len(value) || !jobIdentifierRune(after)) {
+				return true
+			}
+			offset = end
+		}
+	case []any:
+		for _, item := range value {
+			if resultNamesJob(item, jobID) {
+				return true
+			}
+		}
+	case map[string]any:
+		for key, item := range value {
+			if resultNamesJob(key, jobID) || resultNamesJob(item, jobID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func jobIdentifierRune(value rune) bool {
+	return unicode.IsLetter(value) || unicode.IsNumber(value) || unicode.IsMark(value) || value == '_' || value == '-'
 }
 
 func clipTitle(text string) string {

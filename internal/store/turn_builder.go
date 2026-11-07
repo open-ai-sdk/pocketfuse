@@ -320,7 +320,7 @@ func attachToolSpans(turn *Turn) {
 	kept := turn.Steps[:0]
 	for position := range turn.Steps {
 		step := turn.Steps[position]
-		if step.Role != RoleTool || step.Level != "" || !attachToolSpan(kept, step) {
+		if step.Role != RoleTool || (nonDefaultLevel(step.Level) != "" && !strings.EqualFold(step.Level, "OK")) || !attachToolSpan(kept, step) {
 			kept = append(kept, step)
 		}
 	}

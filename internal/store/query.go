@@ -76,7 +76,6 @@ func (s *Store) GetTraceWith(ctx context.Context, id string, options TurnOptions
 		return nil, err
 	}
 	summarizeTrace(&value, observations)
-	annotateObservations(observations)
 	value.Observations = observations
 	value.Turn = buildTurn(&value, observations, options)
 	return &value, nil

@@ -2,23 +2,26 @@ package store
 
 import (
 	"encoding/json"
+	"math"
 	"strconv"
 )
 
 const usageDetailsKey = "langfuse.observation.usage_details"
 
-// genAIUsageKeys maps OTel GenAI usage attributes onto the canonical usage keys.
-var genAIUsageKeys = map[string]string{
-	"gen_ai.usage.input_tokens":                "input",
-	"gen_ai.usage.prompt_tokens":               "input",
-	"gen_ai.usage.output_tokens":               "output",
-	"gen_ai.usage.completion_tokens":           "output",
-	"gen_ai.usage.total_tokens":                "total",
-	"gen_ai.usage.cache_read.input_tokens":     "cached_input",
-	"gen_ai.usage.cache_creation.input_tokens": "cache_creation_input",
-	"gen_ai.usage.reasoning.output_tokens":     "reasoning",
-	"gen_ai.usage.reasoning_tokens":            "reasoning",
-	"gen_ai.usage.tool_use_prompt_tokens":      "tool_use_prompt",
+// genAIUsageKeys is ordered from preferred OTel attributes to legacy aliases.
+// When both spellings are reported, input/output_tokens and the scoped
+// reasoning.output_tokens take precedence over their older counterparts.
+var genAIUsageKeys = []struct{ key, canonical string }{
+	{"gen_ai.usage.input_tokens", "input"},
+	{"gen_ai.usage.prompt_tokens", "input"},
+	{"gen_ai.usage.output_tokens", "output"},
+	{"gen_ai.usage.completion_tokens", "output"},
+	{"gen_ai.usage.total_tokens", "total"},
+	{"gen_ai.usage.cache_read.input_tokens", "cached_input"},
+	{"gen_ai.usage.cache_creation.input_tokens", "cache_creation_input"},
+	{"gen_ai.usage.reasoning.output_tokens", "reasoning"},
+	{"gen_ai.usage.reasoning_tokens", "reasoning"},
+	{"gen_ai.usage.tool_use_prompt_tokens", "tool_use_prompt"},
 }
 
 // NormalizeUsage flattens the usage shapes senders produce into canonical keys
@@ -34,33 +37,35 @@ func NormalizeUsage(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	result := make(map[string]any, len(values))
+	for key, value := range values {
+		if key != usageDetailsKey {
+			result[key] = value
+		}
+	}
+	changed := false
+	for _, attribute := range genAIUsageKeys {
+		value, found := values[attribute.key]
+		if !found {
+			continue
+		}
+		changed = true
+		delete(result, attribute.key)
+		// Explicit canonical usage wins over OTel attributes; the first
+		// attribute in the ordered list wins over its legacy aliases.
+		if _, exists := result[attribute.canonical]; !exists {
+			result[attribute.canonical] = value
+		}
+	}
 	if nested, ok := values[usageDetailsKey]; ok {
+		changed = true
 		if text, isText := nested.(string); isText {
 			_ = json.Unmarshal([]byte(text), &nested)
 		}
 		if details, isMap := nested.(map[string]any); isMap {
+			// Explicit Langfuse details have the highest precedence.
 			for key, value := range details {
 				result[key] = value
 			}
-		}
-	}
-	changed := len(result) > 0
-	for key, value := range values {
-		if key == usageDetailsKey {
-			changed = true
-			continue
-		}
-		canonical, known := genAIUsageKeys[key]
-		if !known {
-			if _, exists := result[key]; !exists {
-				result[key] = value
-			}
-			continue
-		}
-		changed = true
-		// Explicit usage details win over the GenAI attributes.
-		if _, exists := result[canonical]; !exists {
-			result[canonical] = value
 		}
 	}
 	if !changed {
@@ -120,9 +125,11 @@ func numberIn(values map[string]any, keys ...string) (float64, bool) {
 	for _, key := range keys {
 		switch value := values[key].(type) {
 		case float64:
-			return value, true
+			if !math.IsNaN(value) && !math.IsInf(value, 0) {
+				return value, true
+			}
 		case string:
-			if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			if parsed, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(parsed) && !math.IsInf(parsed, 0) {
 				return parsed, true
 			}
 		}

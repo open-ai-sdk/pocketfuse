@@ -80,10 +80,12 @@ type Trace struct {
 	// Turn tells the trace as a story; set on trace detail, absent for a plain request.
 	Turn *Turn `json:"turn,omitempty"`
 
-	// Partial marks an OTLP batch without the trace's root span, whose name and
-	// timestamp must not replace those of the root.
-	Partial       bool `json:"-"`
-	hasGeneration bool
+	// Partial marks an OTLP batch without an authoritative trace name.
+	Partial bool `json:"-"`
+	// ProvisionalTimestamp marks a rootless OTLP timestamp derived from children.
+	// Explicit trace timestamps and real root starts remain authoritative.
+	ProvisionalTimestamp bool `json:"-"`
+	hasGeneration        bool
 
 	// Observations is populated for the trace detail endpoint.
 	Observations []Observation `json:"observations,omitempty"`
@@ -324,10 +326,13 @@ func (s *Store) init(ctx context.Context) error {
 			return fmt.Errorf("initialize schema: %w", err)
 		}
 	}
+	if err := s.repairTraceTimestamps(ctx); err != nil {
+		return err
+	}
 	if err := s.backfillCorrelation(ctx); err != nil {
 		return err
 	}
-	return s.repairTraceTimestamps(ctx)
+	return s.migrateTraceTimestampAuthority(ctx)
 }
 
 var schemaStatements = []string{
@@ -496,12 +501,15 @@ func (s *Store) Ingest(ctx context.Context, records []IngestRecord) (IngestResul
 }
 
 func upsertTrace(ctx context.Context, tx *sql.Tx, value Trace) error {
+	// Partial already identifies a rootless batch for existing store callers.
+	// OTLP also sets ProvisionalTimestamp when only the name was explicit.
+	value.ProvisionalTimestamp = value.ProvisionalTimestamp || value.Partial
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO traces (
 			id, project_id, name, user_id, session_id, environment, release, version,
 			input, output, metadata, tags, public, timestamp, start_time, end_time,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			created_at, updated_at, timestamp_provisional
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			project_id = COALESCE(NULLIF(excluded.project_id, ''), traces.project_id),
 			name = CASE WHEN ? AND traces.name <> '' THEN traces.name ELSE COALESCE(NULLIF(excluded.name, ''), traces.name) END,
@@ -516,6 +524,7 @@ func upsertTrace(ctx context.Context, tx *sql.Tx, value Trace) error {
 			tags = COALESCE(excluded.tags, traces.tags),
 			public = excluded.public,
 			timestamp = CASE WHEN ? AND traces.timestamp <> '' THEN traces.timestamp ELSE COALESCE(NULLIF(excluded.timestamp, ''), traces.timestamp) END,
+			timestamp_provisional = CASE WHEN excluded.timestamp = '' THEN traces.timestamp_provisional WHEN traces.timestamp = '' THEN excluded.timestamp_provisional WHEN excluded.timestamp_provisional THEN traces.timestamp_provisional ELSE FALSE END,
 			start_time = COALESCE(NULLIF(excluded.start_time, ''), traces.start_time),
 			end_time = COALESCE(NULLIF(excluded.end_time, ''), traces.end_time),
 			created_at = COALESCE(NULLIF(traces.created_at, ''), excluded.created_at),
@@ -538,11 +547,15 @@ func upsertTrace(ctx context.Context, tx *sql.Tx, value Trace) error {
 		value.EndTime,
 		value.CreatedAt,
 		value.UpdatedAt,
+		value.ProvisionalTimestamp,
 		value.Partial,
-		value.Partial,
+		value.ProvisionalTimestamp,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert trace %q: %w", value.ID, err)
+	}
+	if value.ProvisionalTimestamp {
+		return updateProvisionalTraceTimestamp(ctx, tx, value.ID, value.Timestamp)
 	}
 	return nil
 }
@@ -599,6 +612,30 @@ func upsertObservation(ctx context.Context, tx *sql.Tx, value Observation) error
 	)
 	if err != nil {
 		return fmt.Errorf("upsert observation %q: %w", value.ID, err)
+	}
+	return updateProvisionalTraceTimestamp(ctx, tx, value.TraceID, value.StartTime)
+}
+
+// updateProvisionalTraceTimestamp compares parsed times, not RFC3339 text:
+// offsets and optional fractional seconds need not sort chronologically.
+func updateProvisionalTraceTimestamp(ctx context.Context, tx *sql.Tx, traceID, candidate string) error {
+	start, ok := parseTimestamp(candidate)
+	if !ok {
+		return nil
+	}
+	var timestamp string
+	err := tx.QueryRowContext(ctx, `SELECT timestamp FROM traces WHERE id = ? AND timestamp_provisional = TRUE`, traceID).Scan(&timestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read provisional timestamp %q: %w", traceID, err)
+	}
+	if current, ok := parseTimestamp(timestamp); ok && !start.Before(current) {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE traces SET timestamp = ? WHERE id = ?`, candidate, traceID); err != nil {
+		return fmt.Errorf("update provisional timestamp %q: %w", traceID, err)
 	}
 	return nil
 }

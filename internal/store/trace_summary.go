@@ -49,6 +49,7 @@ func applyEffectiveTiming(observations []Observation) {
 // summarizeTrace derives the list and header fields of a trace from its spans.
 func summarizeTrace(trace *Trace, observations []Observation) {
 	applyEffectiveTiming(observations)
+	annotateObservations(observations)
 	trace.ObservationCount = len(observations)
 	trace.Status = traceStatus(observations)
 
@@ -101,12 +102,13 @@ func summarizeTrace(trace *Trace, observations []Observation) {
 	}
 }
 
-// ancestorReports reports whether an ancestor already carries the measure. One
-// LLM call is commonly recorded twice (the application's generation and the
-// SDK's child span), and summing both would double every total.
+// ancestorReports reports whether another span for this same model call already
+// carries the measure. Only follow the identity established by foldModelCalls:
+// an ordinary ancestor can represent independent work, not a duplicate report.
+// Walking per measure preserves a child's report when its wrapper omits it.
 func ancestorReports(observation *Observation, byID map[string]*Observation, has func(*Observation) bool) bool {
 	visited := map[string]bool{observation.ID: true}
-	for parentID := observation.ParentObservationID; parentID != "" && !visited[parentID]; {
+	for parentID := observation.MergedInto; parentID != "" && !visited[parentID]; {
 		visited[parentID] = true
 		parent, found := byID[parentID]
 		if !found {
@@ -115,7 +117,7 @@ func ancestorReports(observation *Observation, byID map[string]*Observation, has
 		if has(parent) {
 			return true
 		}
-		parentID = parent.ParentObservationID
+		parentID = parent.MergedInto
 	}
 	return false
 }
@@ -170,7 +172,8 @@ func (s *Store) attachSummaries(ctx context.Context, traces []Trace) error {
 			args = append(args, trace.ID)
 		}
 		rows, err := s.db.QueryContext(ctx, `
-			SELECT id, trace_id, parent_observation_id, type, model, usage, metadata, level, start_time, end_time
+			SELECT id, trace_id, parent_observation_id, type, model, usage, metadata, level, start_time, end_time,
+			       input IS NOT NULL OR output IS NOT NULL
 			FROM observations WHERE trace_id IN (`+placeholders(len(args))+`)`, args...)
 		if err != nil {
 			return fmt.Errorf("summarize traces: %w", err)
@@ -178,7 +181,7 @@ func (s *Store) attachSummaries(ctx context.Context, traces []Trace) error {
 		for rows.Next() {
 			var observation Observation
 			var parent, typ, model, usage, metadata, level, startTime, endTime nullableString
-			if err := rows.Scan(&observation.ID, &observation.TraceID, &parent, &typ, &model, &usage, &metadata, &level, &startTime, &endTime); err != nil {
+			if err := rows.Scan(&observation.ID, &observation.TraceID, &parent, &typ, &model, &usage, &metadata, &level, &startTime, &endTime, &observation.hasPayload); err != nil {
 				_ = rows.Close()
 				return fmt.Errorf("scan trace summary: %w", err)
 			}
