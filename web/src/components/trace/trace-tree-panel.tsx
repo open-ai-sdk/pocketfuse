@@ -94,7 +94,7 @@ function TreeRow({
             onToggle()
           }}
           className={cn(
-            'my-auto flex size-4 shrink-0 items-center justify-center rounded-[2px] text-content-tertiary hover:text-content-primary',
+            'my-auto flex size-11 shrink-0 items-center justify-center rounded-[2px] text-content-tertiary hover:text-content-primary md:size-10 pointer-coarse:size-11',
             !hasChildren && 'invisible',
           )}
         >
@@ -103,7 +103,7 @@ function TreeRow({
         <span
           title={kind.label}
           className={cn(
-            'my-1 flex size-5 shrink-0 items-center justify-center rounded-[3px] border',
+            'my-auto flex size-5 shrink-0 items-center justify-center rounded-[3px] border',
             toneChipClass[kind.tone],
           )}
         >
@@ -165,7 +165,7 @@ function TreeRow({
             error
               ? 'bg-action-danger'
               : pending
-                ? 'animate-pulse bg-action-warning'
+                ? 'motion-safe:animate-pulse bg-action-warning'
                 : toneBarClass[kind.tone],
           )}
           style={{ ...bar, minWidth: 2 }}
@@ -260,12 +260,12 @@ export function TraceTreePanel({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col'>
-      <div className='flex items-center gap-1.5 border-b border-border-primary px-2.5 py-2'>
+      <div className='flex flex-wrap items-center gap-1.5 border-b border-border-primary px-2.5 py-2'>
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder='Find a span or tool'
-          className='h-7 rounded-[3px] border-border-primary bg-surface-tertiary text-[11px] shadow-none'
+          className='h-11 min-w-28 flex-1 rounded-[3px] border-border-primary bg-surface-tertiary text-xs shadow-none'
         />
         {hasErrors && (
           <button
@@ -273,7 +273,7 @@ export function TraceTreePanel({
             aria-pressed={errorsOnly}
             onClick={() => setErrorsOnly((value) => !value)}
             className={cn(
-              'shrink-0 rounded-[3px] border px-1.5 py-1 font-mono text-[9.5px] uppercase',
+              'min-h-11 shrink-0 rounded-[3px] border px-2 py-1 font-mono text-xs uppercase',
               errorsOnly
                 ? 'border-border-danger bg-surface-error text-content-error'
                 : 'border-border-primary text-content-tertiary hover:text-content-secondary',
@@ -289,7 +289,7 @@ export function TraceTreePanel({
             onClick={onToggleRaw}
             title='Nested spans recording one provider call are folded into one row. Show them as recorded.'
             className={cn(
-              'shrink-0 rounded-[3px] border px-1.5 py-1 font-mono text-[9.5px] uppercase',
+              'min-h-11 shrink-0 rounded-[3px] border px-2 py-1 font-mono text-xs uppercase',
               raw
                 ? 'border-border-brand bg-interactive-secondary-hover text-content-brand'
                 : 'border-border-primary text-content-tertiary hover:text-content-secondary',
@@ -304,7 +304,7 @@ export function TraceTreePanel({
           onClick={() => setCollapsed(new Set())}
           aria-label='Expand all'
           title='Expand all'
-          className='text-content-secondary'
+          className='min-h-11 min-w-11 text-content-secondary'
         >
           <ChevronDown />
         </Button>
@@ -314,7 +314,7 @@ export function TraceTreePanel({
           onClick={collapseAll}
           aria-label='Collapse all'
           title='Collapse all'
-          className='text-content-secondary'
+          className='min-h-11 min-w-11 text-content-secondary'
         >
           <ChevronRight />
         </Button>
@@ -371,7 +371,7 @@ export function TraceTreePanel({
           onClick={() => onSelect('trace')}
           className={cn(
             ROW_GRID,
-            'cursor-pointer rounded-[2px] py-1 pr-1.5',
+            'min-h-11 cursor-pointer rounded-[2px] py-1 pr-1.5 md:min-h-10 pointer-coarse:min-h-11',
             selectedId === 'trace' ? 'bg-interactive-secondary-hover' : 'hover:bg-surface-tertiary',
           )}
         >

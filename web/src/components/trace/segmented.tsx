@@ -34,7 +34,7 @@ export function SegmentedControl<T extends string>({
             title={option.disabled ? option.title : option.label}
             onClick={() => !option.disabled && onChange(option.value)}
             className={cn(
-              'flex-1 rounded-[2px] px-2 py-1 text-[11px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-interactive-primary',
+              'min-h-11 min-w-11 flex-1 rounded-[2px] px-2 py-1 text-[11px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-interactive-primary md:min-h-10 md:min-w-10 pointer-coarse:min-h-11 pointer-coarse:min-w-11',
               active
                 ? 'bg-interactive-secondary-hover text-content-brand'
                 : 'text-content-tertiary hover:text-content-secondary',
@@ -94,7 +94,7 @@ export function TabBar<T extends string>({
             onClick={() => onChange(tab.id)}
             onKeyDown={handleKeyDown}
             className={cn(
-              '-mb-px border-b-2 px-2.5 py-2 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-interactive-primary',
+              '-mb-px min-h-11 min-w-11 border-b-2 px-2.5 py-2 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-interactive-primary md:min-h-10 md:min-w-10 pointer-coarse:min-h-11 pointer-coarse:min-w-11',
               isActive
                 ? 'border-border-brand text-content-primary'
                 : 'border-transparent text-content-secondary hover:text-content-primary',

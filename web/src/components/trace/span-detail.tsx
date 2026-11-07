@@ -51,7 +51,7 @@ function Fold({
         type='button'
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className='flex w-full items-center gap-1.5 px-3 py-2 text-left hover:bg-surface-tertiary'
+        className='flex min-h-11 w-full items-center gap-1.5 px-3 py-2 text-left hover:bg-surface-tertiary'
       >
         <ChevronRight
           className={cn('size-3 text-content-tertiary transition-transform', open && 'rotate-90')}
@@ -73,13 +73,13 @@ function Facts({ rows }: { rows: { label: string; value?: string; mono?: boolean
         .filter((row) => row.value)
         .map(({ label, value, mono }) => (
           <div key={label} className='min-w-0'>
-            <dt className='font-mono text-[9.5px] uppercase tracking-[0.08em] text-content-tertiary'>
+            <dt className='font-mono text-xs uppercase tracking-[0.08em] text-content-secondary'>
               {label}
             </dt>
             <dd
               title={value}
               className={cn(
-                'truncate text-xs text-content-primary',
+                'break-words text-xs text-content-primary',
                 mono && 'font-mono text-[11px]',
               )}
             >
@@ -93,7 +93,7 @@ function Facts({ rows }: { rows: { label: string; value?: string; mono?: boolean
 
 function Json({ value }: { value: unknown }) {
   return (
-    <pre className='max-h-72 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-[10.5px] leading-4 text-content-secondary'>
+    <pre className='max-h-72 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2.5 font-mono text-xs leading-5 text-content-secondary'>
       {prettyJson(value)}
     </pre>
   )
@@ -130,14 +130,14 @@ function ToolCallCard({ call }: { call: ToolCall }) {
         )}
       </div>
       {call.args && (
-        <pre className='mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-content-secondary'>
+        <pre className='mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-content-secondary'>
           {readableJson(call.args)}
         </pre>
       )}
       {(call.error || call.result) && (
         <pre
           className={cn(
-            'mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words border-t border-border-primary pt-1.5 font-mono text-[10.5px] leading-4',
+            'mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap break-words border-t border-border-primary pt-1.5 font-mono text-xs leading-5',
             call.error ? 'text-content-error' : 'text-content-secondary',
           )}
         >
@@ -202,7 +202,7 @@ export function ObservationDetail({
           >
             <Icon className='size-3.5' />
           </span>
-          <h2 className='min-w-0 truncate text-sm font-semibold text-content-primary'>
+          <h2 className='min-w-0 break-words text-sm font-semibold text-content-primary'>
             {displayName(observation)}
           </h2>
           <Badge tone={kind.tone} className='rounded-[3px] px-1.5 text-[10px]'>
@@ -242,7 +242,7 @@ export function ObservationDetail({
             <button
               type='button'
               onClick={() => onSelect(observation.mergedInto ?? '')}
-              className='font-medium text-content-brand hover:underline'
+              className='inline-flex min-h-11 items-center font-medium text-content-brand hover:underline'
             >
               Part of one model call
             </button>
@@ -362,7 +362,7 @@ export function TraceDetail({
     <div className='flex flex-col gap-3'>
       <div className={cn(panelSurface, 'px-3.5 py-3')}>
         <div className='flex flex-wrap items-center gap-2'>
-          <h2 className='min-w-0 truncate text-sm font-semibold text-content-primary'>
+          <h2 className='min-w-0 break-words text-sm font-semibold text-content-primary'>
             {trace.name || 'Untitled trace'}
           </h2>
           <StatusChip status={trace.status} />

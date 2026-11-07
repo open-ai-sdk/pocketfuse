@@ -1,11 +1,12 @@
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { ArrowUpRight, ChevronRight, TriangleAlert, X } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ActivityRow, TurnCard } from '../components/session/turn-card'
 import { sessionLabel } from '../components/trace/linked-trace-list'
 import { ObservationDetail, TraceDetail } from '../components/trace/span-detail'
 import { Button } from '../components/ui'
+import { Sheet, SheetContent, SheetTitle } from '../components/ui/sheet'
 import { sessionStoryOptions, traceOptions, traceScoresOptions } from '../lib/queries'
 import { cn, formatCost, formatDate, formatDuration, formatUsage } from '../lib/utils'
 
@@ -31,13 +32,13 @@ function DetailPanel({
     (item) => item.observationId === (observation?.mergedInto ?? observation?.id),
   )
   return (
-    <aside className='fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl min-w-0 flex-col border-l border-border-primary bg-background-primary xl:static xl:z-auto xl:max-w-none'>
+    <div className='flex h-full min-h-0 min-w-0 flex-col bg-background-primary'>
       <div className='flex shrink-0 items-center justify-between gap-2 border-b border-border-primary px-3 py-1.5'>
         <Link
           to='/traces/$traceId'
           params={{ traceId }}
           search={{ obs: observationId }}
-          className='inline-flex items-center gap-0.5 text-[11px] font-medium text-content-brand hover:underline'
+          className='inline-flex min-h-11 items-center gap-0.5 text-xs font-medium text-content-brand hover:underline'
         >
           Open in full trace
           <ArrowUpRight className='size-3' />
@@ -47,7 +48,7 @@ function DetailPanel({
           size='icon-xs'
           onClick={onClose}
           aria-label='Close panel'
-          className='text-content-secondary'
+          className='min-h-11 min-w-11 text-content-secondary'
         >
           <X />
         </Button>
@@ -77,7 +78,7 @@ function DetailPanel({
           />
         )}
       </div>
-    </aside>
+    </div>
   )
 }
 
@@ -95,14 +96,35 @@ export function SessionDetailPage() {
   const { data: story } = useSuspenseQuery(sessionStoryOptions(sessionId, hideNoise))
   const totals = story.totals
   const usage = formatUsage(totals.usage)
+  const [desktop, setDesktop] = useState(() => window.matchMedia('(min-width: 1280px)').matches)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const [retainedSelection, setRetainedSelection] = useState<
+    { traceId: string; observationId?: string } | undefined
+  >(() => (selectedTrace ? { traceId: selectedTrace, observationId: selectedSpan } : undefined))
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1280px)')
+    const update = () => setDesktop(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  // The URL changes immediately; retain the last payload only for the exit.
+  useLayoutEffect(() => {
+    if (selectedTrace) {
+      setRetainedSelection({ traceId: selectedTrace, observationId: selectedSpan })
+    }
+  }, [selectedTrace, selectedSpan])
 
-  const select = (traceId?: string, observationId?: string) =>
+  const select = (traceId?: string, observationId?: string) => {
+    if (traceId && !selectedTrace && document.activeElement instanceof HTMLElement) {
+      returnFocus.current = document.activeElement
+    }
     void navigate({
       to: '/sessions/$sessionId',
       params: { sessionId },
       search: { noise, trace: traceId, obs: observationId },
       replace: true,
     })
+  }
 
   // A link from a trace lands on its turn, not the top of the conversation.
   useEffect(() => {
@@ -110,6 +132,17 @@ export function SessionDetailPage() {
       document.getElementById(`turn-${selectedTrace}`)?.scrollIntoView({ block: 'nearest' })
     }
   }, [selectedTrace])
+
+  const detailTrace = selectedTrace ?? retainedSelection?.traceId
+  const detailSpan = selectedTrace ? selectedSpan : retainedSelection?.observationId
+  const detail = detailTrace ? (
+    <DetailPanel
+      traceId={detailTrace}
+      observationId={detailSpan}
+      onSelect={(id) => select(detailTrace, id)}
+      onClose={() => select()}
+    />
+  ) : null
 
   return (
     <div className='flex h-full min-h-0 flex-col text-content-primary'>
@@ -127,13 +160,13 @@ export function SessionDetailPage() {
           </span>
         </nav>
         <div className='mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5'>
-          <h1 className='min-w-0 max-w-3xl truncate text-base font-semibold tracking-[-0.01em]'>
+          <h1 className='min-w-0 max-w-3xl break-words text-base font-semibold tracking-[-0.01em]'>
             {story.name || story.title || sessionLabel(story.id)}
           </h1>
           <Button
             variant='ghost'
             size='sm'
-            className='shrink-0 text-content-secondary'
+            className='min-h-11 shrink-0 text-content-secondary'
             onClick={() =>
               void navigate({
                 to: '/sessions/$sessionId',
@@ -212,13 +245,34 @@ export function SessionDetailPage() {
             ) : null}
           </div>
         </main>
-        {selectedTrace && (
-          <DetailPanel
-            traceId={selectedTrace}
-            observationId={selectedSpan}
-            onSelect={(id) => select(selectedTrace, id)}
-            onClose={() => select()}
-          />
+        {desktop ? (
+          selectedTrace && (
+            <aside
+              aria-label='Session step detail'
+              className='min-h-0 min-w-0 border-l border-border-primary'
+            >
+              {detail}
+            </aside>
+          )
+        ) : (
+          <Sheet
+            open={Boolean(selectedTrace)}
+            onOpenChange={(open) => {
+              if (!open) select()
+            }}
+            onOpenChangeComplete={(open) => {
+              if (!open && !selectedTrace) setRetainedSelection(undefined)
+            }}
+          >
+            <SheetContent
+              showCloseButton={false}
+              finalFocus={returnFocus}
+              className='gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-2xl'
+            >
+              <SheetTitle className='sr-only'>Session step detail</SheetTitle>
+              {detail}
+            </SheetContent>
+          </Sheet>
         )}
       </div>
     </div>

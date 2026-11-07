@@ -42,17 +42,17 @@ function MessageBlock({
           : 'border-border-primary bg-surface-tertiary',
       )}
     >
-      <span className='font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-content-tertiary'>
+      <span className='font-mono text-xs font-medium uppercase tracking-[0.08em] text-content-secondary'>
         {label}
       </span>
-      <p className='mt-0.5 whitespace-pre-wrap break-words text-[12px] leading-5 text-content-primary'>
+      <p className='mt-0.5 whitespace-pre-wrap break-words text-sm leading-6 text-content-primary'>
         {long && !expanded ? `${preview.text.slice(0, 420)}…` : preview.text}
       </p>
       {long && !expanded && (
         <button
           type='button'
           onClick={() => setExpanded(true)}
-          className='mt-0.5 text-[10.5px] font-medium text-content-brand hover:underline'
+          className='mt-0.5 inline-flex min-h-11 items-center text-xs font-medium text-content-primary underline hover:no-underline'
         >
           Show more
         </button>
@@ -61,7 +61,7 @@ function MessageBlock({
         <button
           type='button'
           onClick={onOpen}
-          className='mt-0.5 text-[10.5px] font-medium text-content-brand hover:underline'
+          className='mt-0.5 inline-flex min-h-11 items-center text-xs font-medium text-content-primary underline hover:no-underline'
         >
           Open the span for all {preview.totalChars.toLocaleString()} characters
         </button>
@@ -119,12 +119,12 @@ function StepRow({
         aria-pressed={selected}
         onClick={onSelect}
         className={cn(
-          'flex w-full flex-col gap-0.5 rounded-[2px] px-1.5 py-1 text-left',
+          'flex min-h-11 w-full flex-col gap-0.5 rounded-[2px] px-1.5 py-1 text-left',
           selected ? 'bg-interactive-secondary-hover' : 'hover:bg-surface-tertiary',
         )}
       >
-        <span className='flex min-w-0 items-center gap-1.5'>
-          <span className='w-11 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-content-tertiary'>
+        <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+          <span className='w-11 shrink-0 text-right font-mono text-xs tabular-nums text-content-secondary'>
             +{formatDuration(step.offsetMs)}
           </span>
           <span
@@ -139,7 +139,7 @@ function StepRow({
           <span
             title={step.name}
             className={cn(
-              'min-w-0 truncate text-[11.5px] font-medium',
+              'min-w-0 break-words text-xs font-medium',
               failed ? 'text-content-error' : 'text-content-primary',
               step.side && 'text-content-secondary',
             )}
@@ -149,7 +149,7 @@ function StepRow({
           {step.side && (
             <span className='shrink-0 text-[9.5px] text-content-tertiary'>side call</span>
           )}
-          <span className='ml-auto flex shrink-0 items-center gap-2 text-[10px] text-content-tertiary'>
+          <span className='ml-auto flex shrink-0 flex-wrap items-center gap-2 text-xs text-content-secondary'>
             {formatUsage(step.usage) && <span>{formatUsage(step.usage)}</span>}
             <span className='w-12 text-right font-mono tabular-nums text-content-secondary'>
               {step.pending ? 'running' : formatDuration(step.durationMs)}
@@ -212,7 +212,7 @@ export function TurnCard({
         <button
           type='button'
           onClick={() => onSelect(turn.traceId)}
-          className='flex min-w-0 items-center gap-1.5 hover:text-content-brand'
+          className='flex min-h-11 min-w-0 items-center gap-1.5 hover:text-content-brand'
         >
           <span
             className={cn(
@@ -248,7 +248,7 @@ export function TurnCard({
         <Link
           to='/traces/$traceId'
           params={{ traceId: turn.traceId }}
-          className='ml-auto inline-flex items-center gap-0.5 text-[10.5px] font-medium text-content-secondary hover:text-content-brand hover:underline'
+          className='ml-auto inline-flex min-h-11 items-center gap-0.5 text-xs font-medium text-content-secondary hover:text-content-brand hover:underline'
         >
           Full trace
           <ArrowUpRight className='size-3' />

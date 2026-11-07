@@ -24,7 +24,7 @@
   --content-brand: #3e63dd;
   --content-primary: #1e1d1b;
   --content-secondary: #544e4c;
-  --content-tertiary: #97918f;
+  --content-tertiary: #625b59;
   --content-information: #113264;
   --content-success: #193b2d;
   --content-warning: #4f3422;
@@ -218,12 +218,28 @@
   --radius-4xl: calc(var(--radius) * 3.33);
 }
 
+/* Reader controls retain an explicit keyboard indicator on every surface. */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--content-brand);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .dark {
   color-scheme: dark;
   --background-primary: #111111;
   --content-primary: #fbfbfa;
   --content-secondary: #c3c2bb;
-  --content-tertiary: #6e6e6e;
+  --content-tertiary: #b6b1af;
   --content-brand: #8da4ef;
   --content-information: #8ec8f6;
   --content-success: #8eceaa;

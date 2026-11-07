@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Copy, TriangleAlert, Wrench } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   parseConversation,
   parseModelOutput,
@@ -33,7 +33,7 @@ export function ExpandableText({
       <button
         type='button'
         onClick={() => setExpanded(true)}
-        className='inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-brand'
+        className='inline-flex min-h-11 items-center gap-1 text-xs text-content-tertiary hover:text-content-brand'
       >
         <ChevronRight className='size-3' />
         Show {value.length.toLocaleString()} characters
@@ -42,14 +42,14 @@ export function ExpandableText({
   }
   return (
     <div>
-      <p className='whitespace-pre-wrap break-words text-[11.5px] leading-5 text-content-primary'>
+      <p className='whitespace-pre-wrap break-words text-sm leading-6 text-content-primary'>
         {long && !expanded ? `${value.slice(0, LONG_TEXT_CHARS)}…` : value}
       </p>
       {long && !expanded && (
         <button
           type='button'
           onClick={() => setExpanded(true)}
-          className='mt-1 text-[10.5px] font-medium text-content-brand hover:underline'
+          className='mt-1 inline-flex min-h-11 items-center text-xs font-medium text-content-brand hover:underline'
         >
           Show all {value.length.toLocaleString()} characters
         </button>
@@ -60,7 +60,7 @@ export function ExpandableText({
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <pre className='overflow-auto whitespace-pre-wrap break-words rounded-[3px] border border-border-primary bg-surface-tertiary p-2 font-mono text-[10.5px] leading-4 text-content-secondary'>
+    <pre className='overflow-auto whitespace-pre-wrap break-words rounded-[3px] border border-border-primary bg-surface-tertiary p-2 font-mono text-xs leading-5 text-content-secondary'>
       {prettyJson(value) || '—'}
     </pre>
   )
@@ -111,7 +111,7 @@ function Bubble({ message }: { message: DisplayMessage }) {
     <div className='rounded-[3px] border border-border-primary bg-surface-primary px-3 py-2'>
       <Badge
         tone={onlyResults ? 'blue' : roleTone(role)}
-        className='mb-1 rounded-[3px] px-1 font-mono text-[9.5px] uppercase'
+        className='mb-1 rounded-[3px] px-1 font-mono text-xs uppercase'
       >
         {onlyResults ? 'tool result' : (message.name ?? message.role)}
       </Badge>
@@ -138,7 +138,7 @@ function ConversationView({ messages, tools }: { messages: DisplayMessage[]; too
         <button
           type='button'
           onClick={() => setShowTools((value) => !value)}
-          className='text-left text-[10.5px] text-content-tertiary hover:text-content-secondary'
+          className='min-h-11 text-left text-xs text-content-tertiary hover:text-content-secondary'
         >
           {showTools
             ? tools.join(', ')
@@ -149,7 +149,7 @@ function ConversationView({ messages, tools }: { messages: DisplayMessage[]; too
         <button
           type='button'
           onClick={() => setShowAll(true)}
-          className='rounded-[3px] border border-dashed border-border-primary py-1.5 text-[10.5px] font-medium text-content-secondary hover:text-content-brand'
+          className='min-h-11 rounded-[3px] border border-dashed border-border-primary py-1.5 text-xs font-medium text-content-secondary hover:text-content-brand'
         >
           Show {hidden} earlier message{hidden === 1 ? '' : 's'}
         </button>
@@ -183,7 +183,7 @@ function JsonTable({ value }: { value: unknown }) {
             {typeof entry === 'string' ||
             typeof entry === 'number' ||
             typeof entry === 'boolean' ? (
-              <span className='whitespace-pre-wrap break-words text-[11.5px] text-content-primary'>
+              <span className='whitespace-pre-wrap break-words text-sm text-content-primary'>
                 {String(entry)}
               </span>
             ) : (
@@ -208,8 +208,22 @@ export function IOPreview({
   className?: string
 }) {
   const [mode, setMode] = useState<'formatted' | 'raw'>('formatted')
-  const [copied, setCopied] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle')
+  const copyAttempt = useRef(0)
+  const copying = useRef(false)
+  const copyTimer = useRef<number | undefined>(undefined)
   const text = useMemo(() => prettyJson(value), [value])
+  const copied = copyStatus === 'success'
+
+  useEffect(() => {
+    setCopyStatus('idle')
+    return () => {
+      copyAttempt.current += 1
+      copying.current = false
+      window.clearTimeout(copyTimer.current)
+      copyTimer.current = undefined
+    }
+  }, [text])
   const oversized = text.length > MAX_RENDER_CHARS
   const conversation = useMemo(
     () => (oversized ? undefined : parseConversation(value)),
@@ -220,12 +234,26 @@ export function IOPreview({
     [oversized, value],
   )
   const copy = async () => {
+    if (copying.current) return
+    copying.current = true
+    const attempt = ++copyAttempt.current
+    window.clearTimeout(copyTimer.current)
+    copyTimer.current = undefined
+    setCopyStatus('pending')
     try {
       await navigator.clipboard.writeText(text)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1300)
+      if (attempt !== copyAttempt.current) return
+      setCopyStatus('success')
+      copyTimer.current = window.setTimeout(() => {
+        if (attempt !== copyAttempt.current) return
+        copyTimer.current = undefined
+        setCopyStatus('idle')
+      }, 1300)
     } catch {
-      /* clipboard unavailable in non-secure contexts */
+      if (attempt !== copyAttempt.current) return
+      setCopyStatus('error')
+    } finally {
+      if (attempt === copyAttempt.current) copying.current = false
     }
   }
   const empty = value === undefined || value === null
@@ -253,8 +281,9 @@ export function IOPreview({
                 key={item}
                 type='button'
                 onClick={() => setMode(item)}
+                aria-pressed={mode === item}
                 className={cn(
-                  'rounded-[2px] px-1.5 py-0.5 text-[10px] capitalize',
+                  'inline-flex min-h-11 items-center rounded-[2px] px-2.5 text-xs capitalize',
                   mode === item
                     ? 'bg-interactive-secondary-hover text-content-primary'
                     : 'text-content-tertiary hover:text-content-secondary',
@@ -271,12 +300,60 @@ export function IOPreview({
             size='icon-xs'
             onClick={() => void copy()}
             aria-label={`Copy ${label.toLowerCase()}`}
-            className='text-content-secondary hover:text-content-brand'
+            aria-disabled={copyStatus === 'pending'}
+            className='text-content-secondary hover:text-content-brand aria-disabled:cursor-wait aria-disabled:opacity-50'
           >
-            {copied ? <Check /> : <Copy />}
+            <span className='pointer-events-none relative inline-flex size-4 items-center justify-center'>
+              <Copy
+                aria-hidden='true'
+                className={cn(
+                  'transition-[scale,opacity,filter] duration-300 ease-[cubic-bezier(.2,0,0,1)] motion-reduce:transition-none',
+                  copied ? 'scale-25 opacity-0 blur-[4px]' : 'scale-100 opacity-100 blur-0',
+                )}
+              />
+              <Check
+                aria-hidden='true'
+                className={cn(
+                  'absolute inset-0 m-auto transition-[scale,opacity,filter] duration-300 ease-[cubic-bezier(.2,0,0,1)] motion-reduce:transition-none',
+                  copied ? 'scale-100 opacity-100 blur-0' : 'scale-25 opacity-0 blur-[4px]',
+                )}
+              />
+            </span>
           </Button>
         )}
       </header>
+      {!empty && (
+        <p
+          role='status'
+          aria-live='polite'
+          aria-atomic='true'
+          className={cn(
+            'min-h-5 px-3 text-xs leading-5',
+            copyStatus === 'error' ? 'text-content-error' : 'text-content-secondary',
+          )}
+        >
+          {copyStatus === 'pending'
+            ? 'Copying…'
+            : copied
+              ? 'Copied to clipboard.'
+              : copyStatus === 'error'
+                ? 'Copy failed.'
+                : ''}
+        </p>
+      )}
+      {copyStatus === 'error' && !empty && (
+        <label className='mx-3 mt-2 flex flex-col gap-1 text-xs text-content-secondary'>
+          Select the raw JSON below and copy it manually.
+          <textarea
+            readOnly
+            value={text}
+            rows={6}
+            aria-label={`${label} raw JSON for manual copying`}
+            onFocus={(event) => event.currentTarget.select()}
+            className='max-h-64 w-full resize-y rounded-[3px] border border-border-primary bg-surface-tertiary p-2 font-mono text-xs leading-5 text-content-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-content-brand'
+          />
+        </label>
+      )}
       <div className='p-3'>
         {empty ? (
           <p className='py-2 text-center text-[11px] text-content-tertiary'>No data</p>

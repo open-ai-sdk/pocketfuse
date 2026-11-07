@@ -185,7 +185,12 @@ function TraceTable({ traces }: { traces: Trace[] }) {
   )
   const table = useReactTable({ data: traces, columns, getCoreRowModel: getCoreRowModel() })
   return (
-    <div className='overflow-x-auto'>
+    <div
+      className='overflow-x-auto [&_[data-slot=table-container]]:overflow-visible'
+      role='region'
+      aria-label='Traces table; scroll horizontally for all columns'
+      tabIndex={0}
+    >
       <Table className='w-full min-w-[1040px]'>
         <TableHeader>
           <TableRow className='border-b border-border-primary bg-surface-tertiary hover:bg-surface-tertiary'>
@@ -324,7 +329,7 @@ export function TracesPage() {
         }
       />
       <div className='flex flex-col gap-5 px-4 py-5 sm:px-6'>
-        <MetricStrip>
+        <MetricStrip className='min-[360px]:grid-cols-2 xl:grid-cols-4'>
           <MetricCell
             icon={Activity}
             label='Total traces'
