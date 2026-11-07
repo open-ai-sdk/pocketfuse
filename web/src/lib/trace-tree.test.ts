@@ -36,8 +36,38 @@ describe('visibleObservations', () => {
     expect(call.children.map((node) => node.observation.id)).toEqual(['inner'])
   })
 
-  it('shows every span when asked', () => {
-    expect(visibleObservations(spans, true)).toHaveLength(4)
+  it('keeps the recorded hierarchy in raw mode', () => {
+    const roots = buildObservationTree(visibleObservations(spans, true))
+    const stream = roots[0].children[0].children[0]
+    expect(stream.observation.id).toBe('stream')
+    expect(stream.children.map((node) => node.observation.id)).toEqual(['inner'])
+  })
+
+  it('reattaches surviving children through every folded provider span', () => {
+    const observations: Observation[] = [
+      ...spans.filter((item) => item.id !== 'inner'),
+      { id: 'nested-stream', parentObservationId: 'stream', mergedInto: 'stream' },
+      { id: 'inner', parentObservationId: 'nested-stream' },
+    ]
+    const roots = buildObservationTree(visibleObservations(observations, false))
+    expect(roots.map((node) => node.observation.id)).toEqual(['turn'])
+    expect(roots[0].children[0].children.map((node) => node.observation.id)).toEqual(['inner'])
+  })
+
+  it('preserves the recorded parent when a merge target is missing or cyclic', () => {
+    const observations: Observation[] = [
+      { id: 'cycle-a', mergedInto: 'cycle-b' },
+      { id: 'cycle-b', mergedInto: 'cycle-a' },
+      { id: 'unresolved', mergedInto: 'missing' },
+      { id: 'cycle-child', parentObservationId: 'cycle-a' },
+      { id: 'orphan-child', parentObservationId: 'unresolved' },
+    ]
+    expect(
+      visibleObservations(observations, false).map((item) => [item.id, item.parentObservationId]),
+    ).toEqual([
+      ['cycle-child', 'cycle-a'],
+      ['orphan-child', 'unresolved'],
+    ])
   })
 })
 

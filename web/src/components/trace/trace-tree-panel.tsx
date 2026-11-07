@@ -200,6 +200,7 @@ export function TraceTreePanel({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const [errorsOnly, setErrorsOnly] = useState(false)
   const treeRef = useRef<HTMLDivElement>(null)
+  const filtering = query.trim() !== '' || errorsOnly
   const windowMs = Math.max(1, timeWindow.endMs - timeWindow.originMs)
   const steps = useMemo(
     () => new Map((trace.turn?.steps ?? []).map((step) => [step.observationId, step])),
@@ -219,9 +220,9 @@ export function TraceTreePanel({
     })
 
   const rows = useMemo(() => {
-    const flat = flattenTree(roots, collapsed)
+    const flat = flattenTree(roots, filtering ? new Set() : collapsed)
     const needle = query.trim().toLowerCase()
-    if (!needle && !errorsOnly) return flat
+    if (!filtering) return flat
     const matches = (item: FlatNode) => {
       const observation = item.node.observation
       const tools = steps.get(observation.id)?.toolCalls?.map((call) => call.name) ?? []
@@ -246,7 +247,7 @@ export function TraceTreePanel({
       }
     }
     return flat.filter((item) => visible.has(item.node.observation.id))
-  }, [roots, collapsed, query, errorsOnly, steps])
+  }, [roots, collapsed, query, errorsOnly, steps, filtering])
 
   const collapseAll = () =>
     setCollapsed(
@@ -399,7 +400,7 @@ export function TraceTreePanel({
               flat={flat}
               selected={selectedId === flat.node.observation.id}
               onSelect={() => onSelect(flat.node.observation.id)}
-              collapsed={collapsed.has(flat.node.observation.id)}
+              collapsed={!filtering && collapsed.has(flat.node.observation.id)}
               onToggle={() => toggleCollapse(flat.node.observation.id)}
               originMs={timeWindow.originMs}
               windowMs={windowMs}

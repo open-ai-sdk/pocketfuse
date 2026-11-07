@@ -5,15 +5,21 @@ import type { Observation } from './api'
 // move up to the row it folded into.
 export function visibleObservations(observations: Observation[], raw: boolean): Observation[] {
   if (raw) return observations
-  const mergedInto = new Map(
-    observations.flatMap((item) => (item.mergedInto ? [[item.id, item.mergedInto] as const] : [])),
-  )
+  const byId = new Map(observations.map((item) => [item.id, item]))
   return observations
     .filter((item) => !item.mergedInto)
     .map((item) => {
       const parent = item.parentObservationId
-      const target = parent ? mergedInto.get(parent) : undefined
-      return target ? { ...item, parentObservationId: target } : item
+      let target = parent ? byId.get(parent) : undefined
+      if (!target?.mergedInto) return item
+      const visited = new Set([item.id])
+      while (target?.mergedInto && !visited.has(target.id)) {
+        visited.add(target.id)
+        target = byId.get(target.mergedInto)
+      }
+      return target && !target.mergedInto && target.id !== item.id
+        ? { ...item, parentObservationId: target.id }
+        : item
     })
 }
 

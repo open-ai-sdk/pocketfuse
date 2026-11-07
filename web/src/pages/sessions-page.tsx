@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ChevronLeft, ChevronRight, MessagesSquare, TriangleAlert } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MessagesSquare, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { SESSIONS_PAGE_SIZE, sessionsOptions } from '../lib/queries'
 import { formatRelative } from '../lib/utils'
@@ -24,12 +24,28 @@ export function SessionsPage() {
       <PageHeader
         eyebrow='Observe'
         title='Sessions'
-        count={total.toLocaleString()}
+        count={sessions.isError ? undefined : total.toLocaleString()}
         description='Conversations and threads: every trace that carries the same session or thread id.'
       />
       <div className='px-4 py-5 sm:px-6'>
         <Panel>
-          {rows.length === 0 ? (
+          {sessions.isError ? (
+            <EmptyPanel
+              icon={<TriangleAlert className='size-4' />}
+              title='Could not load sessions'
+              description={
+                sessions.error instanceof Error
+                  ? sessions.error.message
+                  : 'The local API is unavailable. Start Pocketfuse and try again.'
+              }
+              action={
+                <Button variant='outline' size='sm' onClick={() => void sessions.refetch()}>
+                  <RefreshCw data-icon='inline-start' />
+                  Try again
+                </Button>
+              }
+            />
+          ) : rows.length === 0 ? (
             <div>
               <EmptyPanel
                 icon={<MessagesSquare className='size-4' />}
@@ -117,7 +133,7 @@ export function SessionsPage() {
               ))}
             </ul>
           )}
-          {totalPages > 1 && (
+          {(totalPages > 1 || page > 1) && (
             <div className='flex items-center justify-end gap-1 border-t border-border-primary px-4 py-2.5'>
               <Button
                 variant='ghost'
@@ -129,7 +145,7 @@ export function SessionsPage() {
                 <ChevronLeft />
               </Button>
               <span className='min-w-14 text-center font-mono text-[10px] text-content-secondary'>
-                {page} / {totalPages}
+                {sessions.isError ? `Page ${page}` : `${page} / ${totalPages}`}
               </span>
               <Button
                 variant='ghost'
