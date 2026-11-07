@@ -15,22 +15,25 @@ import (
 
 const threadSessionPrefix = "thread:"
 
-type tools struct{ store *store.Store }
+type tools struct {
+	store       *store.Store
+	errorBudget int
+}
 
 func registerTools(server *mcp.Server, t *tools) {
-	addTool(server, "list_traces", "List traces",
+	addTool(server, t.errorBudget, "list_traces", "List traces",
 		"Search traces, newest first. Filter by name or id prefix, session or thread, user, status, time. Routine polling is hidden unless include_noise is true. Paginated.", t.listTraces)
-	addTool(server, "list_sessions", "List sessions",
+	addTool(server, t.errorBudget, "list_sessions", "List sessions",
 		"List conversations, most recently active first, with each one's opening message and failed span count. Paginated.", t.listSessions)
-	addTool(server, "get_session_timeline", "Get session timeline",
+	addTool(server, t.errorBudget, "get_session_timeline", "Get session timeline",
 		"Read one conversation in order: each turn, wake turn and background job with its opening message, reply, model calls, tool calls with arguments and results, latency, tokens and errors. Text is clipped; paginated by item.", t.getSessionTimeline)
-	addTool(server, "get_trace", "Get trace as a tree",
+	addTool(server, t.errorBudget, "get_trace", "Get trace as a tree",
 		"Read one trace as a compact span tree. Paginated by node; raw_spans disables provider folding. Omitted header fields are explicitly listed: read field=header with offset/max_chars to retrieve the full header JSON including metadata and every score.", t.getTrace)
-	addTool(server, "get_observation", "Get one observation",
+	addTool(server, t.errorBudget, "get_observation", "Get one observation",
 		"Read one span's input, output and metadata as text. Each field is returned in chunks: pass field and offset to continue, or from_end to read the end of a long prompt, where the latest messages are.", t.getObservation)
-	addTool(server, "recent_errors", "Recent errors",
+	addTool(server, t.errorBudget, "recent_errors", "Recent errors",
 		"List failed spans, newest first, from the last 24 hours by default. A tool error the model recovered from is not a failed span: see failedTools in get_session_timeline. Paginated.", t.recentErrors)
-	addTool(server, "slow_calls", "Slow call summary",
+	addTool(server, t.errorBudget, "slow_calls", "Slow call summary",
 		"Summarize latency by kind and name (count, p50, p95, max, total), slowest p95 first, and list the slowest individual spans, from the last 24 hours by default. Long-lived sockets count as requests: use kind to narrow.", t.slowCalls)
 }
 
@@ -246,7 +249,8 @@ func (t *tools) getSessionTimeline(ctx context.Context, input sessionTimelineInp
 	}
 	offset := max(input.Offset, 0)
 	limit := bound(input.Limit, 10, 30)
-	window := story.Items[min(offset, len(story.Items)):min(offset+limit, len(story.Items))]
+	start := min(offset, len(story.Items))
+	window := story.Items[start : start+min(limit, len(story.Items)-start)]
 	items := make([]timelineItem, 0, len(window))
 	for _, item := range window {
 		items = append(items, clipTimelineItem(item))
@@ -370,7 +374,8 @@ func (t *tools) getTrace(ctx context.Context, input getTraceInput, filter *redac
 	offset := max(input.Offset, 0)
 	nodes := traceTree(trace, input.RawSpans)
 	total := len(nodes)
-	nodes = nodes[min(offset, total):min(offset+bound(input.Limit, 80, 200), total)]
+	start := min(offset, total)
+	nodes = nodes[start : start+min(bound(input.Limit, 80, 200), total-start)]
 	omitted := []string{}
 	if scores.Total > len(scores.Data) {
 		omitted = append(omitted, "scores")

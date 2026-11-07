@@ -401,7 +401,7 @@ func TestRedactorLeavesOrdinaryDataAlone(t *testing.T) {
 	cases := []string{
 		`{"input_tokens":15749,"output_tokens":76,"total_tokens":15825,"cached_input_tokens":12}`,
 		`{"token":{"type":"string","description":"x"}}`,
-		`Use bearer authentication and authorization: required for this endpoint`,
+		`authorization: required for this endpoint`,
 		`{"input":"a","url":"https://x.test/dp/B07?ref=abc123&keywords=echo"}`,
 	}
 	for _, input := range cases {

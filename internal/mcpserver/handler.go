@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/open-ai-sdk/pocketfuse/internal/store"
@@ -34,8 +35,15 @@ Every response is bounded: continue list pages with nextOffset, and field window
 // serves current clients (per-request metadata) and legacy `initialize` clients
 // alike, keeps no per-client state, and needs no session cleanup.
 func NewHandler(st *store.Store, version string) http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: "pocketfuse", Title: "Pocketfuse", Version: version}, &mcp.ServerOptions{Instructions: instructions})
-	registerTools(server, &tools{store: st})
+	implementation := &mcp.Implementation{Name: "pocketfuse", Title: "Pocketfuse", Version: version}
+	server := mcp.NewServer(implementation, &mcp.ServerOptions{Instructions: instructions})
+	// New-protocol SDK responses gain these properties after our tool handler.
+	// Reserve their exact encoded size, including the separating comma.
+	annotations, _ := json.Marshal(map[string]any{
+		"_meta":      mcp.Meta{mcp.MetaKeyServerInfo: implementation},
+		"resultType": "complete",
+	})
+	registerTools(server, &tools{store: st, errorBudget: hardResponseBytes - (len(annotations) - 1)})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
 		Stateless:           true,
 		JSONResponse:        true,
@@ -109,7 +117,7 @@ func isLoopbackOrigin(origin string) bool {
 // addTool registers a read-only tool whose result is one bounded, redacted JSON
 // text. No output schema is declared, because the protocol would then require a
 // second structured copy of the result and double what reaches the model.
-func addTool[In any](server *mcp.Server, name, title, description string, handler func(context.Context, In, *redactor) (any, error)) {
+func addTool[In any](server *mcp.Server, errorBudget int, name, title, description string, handler func(context.Context, In, *redactor) (any, error)) {
 	openWorld := false
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        name,
@@ -123,16 +131,58 @@ func addTool[In any](server *mcp.Server, name, title, description string, handle
 		value, err := handler(ctx, input, filter)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, nil, fmt.Errorf("query exceeded %s: narrow the time window", toolTimeout)
+				err = fmt.Errorf("query exceeded %s: narrow the time window", toolTimeout)
 			}
-			return nil, nil, errors.New(filter.Text(err.Error()))
+			return toolError(err, filter, errorBudget), nil, nil
 		}
 		text, err := filter.render(value)
 		if err != nil {
-			return nil, nil, err
+			return toolError(err, filter, errorBudget), nil, nil
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
 	})
+}
+
+// toolError caps the serialized MCP result, not just the unescaped message.
+// Redact before clipping, once: a cut may leave a partial redaction marker.
+func toolError(err error, filter *redactor, budget int) *mcp.CallToolResult {
+	text := strings.ToValidUTF8(filter.Text(err.Error()), "\uFFFD")
+	content := &mcp.TextContent{}
+	result := &mcp.CallToolResult{IsError: true, Content: []mcp.Content{content}}
+	const notice = "\n[Truncated: response byte limit reached; shorten the request.]"
+	setPrefix := func(end int, truncated bool) {
+		for end > 0 && end < len(text) && !utf8.RuneStart(text[end]) {
+			end--
+		}
+		content.Text = text[:end]
+		if truncated {
+			content.Text += notice
+		}
+	}
+	fits := func() bool {
+		// The fixed result contains only JSON-serializable text content.
+		encoded, _ := json.Marshal(result)
+		return len(encoded) <= budget
+	}
+	end := min(len(text), budget)
+	setPrefix(end, end < len(text))
+	if fits() {
+		return result
+	}
+	// Escaping can expand each source byte differently. Search complete UTF-8
+	// prefixes instead of subtracting escaped excess from unescaped length.
+	low, high := 0, end
+	for low < high {
+		mid := low + (high-low+1)/2
+		setPrefix(mid, true)
+		if fits() {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	setPrefix(low, true)
+	return result
 }
 
 // timeRange resolves from/to into the store's timestamp text. Both accept

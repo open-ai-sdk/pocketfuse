@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const sensitiveKeys = `(?:proxy[-_])?authorization|x[-_]api[-_]key|api[-_]?key|(?:access|refresh|id|auth|session|bearer)[-_]?token|token|(?:client[-_])?secret|secret[-_]?key|private[-_]?key|password|passwd|(?:set[-_])?cookie`
+const sensitiveKeys = `(?:proxy[-_])?authorization|x[-_]api[-_]key|api[-_]?key|(?:access|refresh|id|auth|session|bearer)[-_]?token|[A-Za-z0-9_-]+[-_]token|token|(?:client[-_])?secret|secret[-_]?key|private[-_]?key|password|passwd|(?:set[-_])?cookie`
 
 // Spans can hold request headers and credentials. Every tool response passes
 // through these patterns, and the count of what they removed is reported, so a
@@ -20,7 +20,7 @@ var (
 	headerPairPattern = regexp.MustCompile(`(?i)("(?:name|key)"\s*:\s*"(?:` + sensitiveKeys + `)"\s*,\s*"value"\s*:\s*")((?:[^"\\]|\\.)+)(")`)
 	queryPattern      = regexp.MustCompile(`(?i)([?&](?:token|access_token|refresh_token|id_token|api_key|apikey|key|secret|signature|sig|password|x-amz-signature|x-amz-credential|x-amz-security-token)=)([^&"\s\\#]+)()`)
 	headerTextPattern = regexp.MustCompile(`(?i)(\b(?:authorization|x-api-key|set-cookie|cookie)\s*:\s*)([^"\\\r\n]{8,})()`)
-	schemeTextPattern = regexp.MustCompile(`(?i)(\b(?:bearer|basic)\s+)([A-Za-z0-9\-._~+/]{8,}={0,2})()`)
+	schemeTextPattern = regexp.MustCompile(`(?i)(\b(?:bearer|basic)\s+)([A-Za-z0-9\-._~+/]+={0,2})()`)
 )
 
 // credentialPatterns match values that are secret by shape alone.
@@ -47,7 +47,9 @@ func (r *redactor) Text(value string) string {
 	value = r.keep(value, headerPairPattern, "credential_field", nil)
 	value = r.keep(value, queryPattern, "url_credential", nil)
 	value = r.keep(value, headerTextPattern, "credential_header", looksLikeToken)
-	value = r.keep(value, schemeTextPattern, "auth_scheme_token", looksLikeToken)
+	// Scheme syntax is also valid in prose; prefer privacy over guessing which
+	// alphabetic words are credentials.
+	value = r.keep(value, schemeTextPattern, "auth_scheme_token", nil)
 	for _, credential := range credentialPatterns {
 		value = credential.pattern.ReplaceAllStringFunc(value, func(string) string {
 			r.counts[credential.kind]++
@@ -71,8 +73,7 @@ func (r *redactor) keep(value string, pattern *regexp.Regexp, kind string, accep
 	})
 }
 
-// looksLikeToken tells a credential from words that follow "bearer" or
-// "authorization:" in prose, which have no digits and are not very long.
+// Header prose needs a stronger signal than a credential's scheme prefix.
 func looksLikeToken(value string) bool {
 	return strings.ContainsAny(value, "0123456789") || len(value) >= 32
 }
