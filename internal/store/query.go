@@ -153,7 +153,7 @@ func (s *Store) ListSessions(ctx context.Context, filter SessionFilter) (Page[Se
 	if err := s.attachSessionCounts(ctx, data); err != nil {
 		return Page[Session]{}, err
 	}
-	if err := s.sessionSummaries(ctx, data); err != nil {
+	if err := s.sessionSummaries(ctx, data, filter.TitleFilter); err != nil {
 		return Page[Session]{}, err
 	}
 	return Page[Session]{Data: data, Total: total, Page: page, Limit: limit}, nil

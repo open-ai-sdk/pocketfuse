@@ -95,18 +95,65 @@ func (r *redactor) report() *Redactions {
 	return &Redactions{Count: total, Kinds: r.counts, Note: "Credentials in span data were replaced by [REDACTED:kind] markers."}
 }
 
+// fieldResponse keeps already-redacted character windows out of the final
+// credential pass. Redacting a partial marker would change its byte content
+// without changing the continuation offsets.
+type fieldPayload struct {
+	name  string
+	value *fieldSlice
+}
+
+type fieldResponse struct {
+	body   any
+	fields []fieldPayload
+}
+
+func newFieldResponse(body any, fields ...fieldPayload) fieldResponse {
+	return fieldResponse{body: body, fields: fields}
+}
+
+// fits measures the exact final JSON, including redaction expansion and its
+// report, without counting redactions again while trying a smaller window.
+func (r *redactor) fits(value any) bool {
+	probe := newRedactor()
+	for kind, count := range r.counts {
+		probe.counts[kind] = count
+	}
+	_, err := probe.render(value)
+	return err == nil
+}
+
 // render serializes a tool result, redacts it and appends the redaction report.
 // A result over the hard limit becomes an error: the per-tool budgets should
 // prevent it, and overflowing a model's context silently would be worse.
 func (r *redactor) render(value any) (string, error) {
-	// HTML escaping would hide URL query separators from the patterns.
-	var encoded bytes.Buffer
-	encoder := json.NewEncoder(&encoded)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		return "", fmt.Errorf("encode result: %w", err)
+	var fields []fieldPayload
+	if response, ok := value.(fieldResponse); ok {
+		value, fields = response.body, response.fields
 	}
-	text := r.Text(strings.TrimSpace(encoded.String()))
+	text, err := encodeResult(value)
+	if err != nil {
+		return "", err
+	}
+	text = r.Text(text)
+	if len(fields) > 0 {
+		var encoded bytes.Buffer
+		encoded.WriteString(strings.TrimSuffix(text, "}"))
+		encoder := json.NewEncoder(&encoded)
+		encoder.SetEscapeHTML(false)
+		for _, field := range fields {
+			if field.value == nil {
+				continue
+			}
+			// Names are fixed tool schema properties, never span content.
+			encoded.WriteString(`,"` + field.name + `":`)
+			if err := encoder.Encode(field.value); err != nil {
+				return "", fmt.Errorf("encode field window: %w", err)
+			}
+		}
+		encoded.WriteByte('}')
+		text = encoded.String()
+	}
 	if report := r.report(); report != nil {
 		appended, err := json.Marshal(report)
 		if err != nil {
@@ -115,7 +162,18 @@ func (r *redactor) render(value any) (string, error) {
 		text = strings.TrimSuffix(text, "}") + `,"redactions":` + string(appended) + "}"
 	}
 	if len(text) > hardResponseBytes {
-		return "", fmt.Errorf("result of %d bytes exceeds the %d byte limit: narrow the request with limit or max_chars", len(text), hardResponseBytes)
+		return "", fmt.Errorf("result of %d bytes exceeds the %d byte limit: narrow the request filters; for trace headers use get_trace field=header, for span payloads use get_observation with field", len(text), hardResponseBytes)
 	}
 	return text, nil
+}
+
+func encodeResult(value any) (string, error) {
+	// HTML escaping would hide URL query separators from the patterns.
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return "", fmt.Errorf("encode result: %w", err)
+	}
+	return strings.TrimSpace(encoded.String()), nil
 }

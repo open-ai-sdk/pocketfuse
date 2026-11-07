@@ -59,7 +59,12 @@ func seedStore(t *testing.T) *store.Store {
 
 func connect(t *testing.T, protocolVersion string) (*mcp.ClientSession, *httptest.Server) {
 	t.Helper()
-	server := httptest.NewServer(NewHandler(seedStore(t), "test"))
+	return connectStore(t, seedStore(t), protocolVersion)
+}
+
+func connectStore(t *testing.T, st *store.Store, protocolVersion string) (*mcp.ClientSession, *httptest.Server) {
+	t.Helper()
+	server := httptest.NewServer(NewHandler(st, "test"))
 	t.Cleanup(server.Close)
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: server.URL}, &mcp.ClientSessionOptions{ProtocolVersion: protocolVersion})
@@ -173,6 +178,10 @@ func TestInvalidArgumentsAreToolErrors(t *testing.T) {
 		{"get_observation", map[string]any{"observation_id": "gen", "offset": 5}, "need field"},
 		{"get_observation", map[string]any{"observation_id": "gen", "field": "nope"}, "not one of"},
 		{"get_session_timeline", map[string]any{}, "required"},
+		{"get_trace", map[string]any{"trace_id": "t1", "field": "metadata"}, "field must be header"},
+		{"get_trace", map[string]any{"trace_id": "t1", "max_chars": 10}, "need field=header"},
+		{"get_trace", map[string]any{"trace_id": "t1", "field": "header", "offset": 1, "from_end": true}, "cannot be combined"},
+		{"get_observation", map[string]any{"observation_id": "gen", "field": "input", "offset": 1, "from_end": true}, "cannot be combined"},
 		{"slow_calls", map[string]any{"kind": "nope"}, "not one of"},
 	}
 	for _, current := range cases {
@@ -234,8 +243,8 @@ func TestGetObservationIsBoundedAndChunked(t *testing.T) {
 		t.Errorf("tail = %v", end)
 	}
 	_, huge := call(t, session, "get_observation", map[string]any{"observation_id": "gen", "field": "input", "max_chars": 10_000_000})
-	if got := len([]rune(huge["input"].(map[string]any)["text"].(string))); got != maxFieldChars {
-		t.Errorf("max_chars ceiling not applied: %d", got)
+	if got := len([]rune(huge["input"].(map[string]any)["text"].(string))); got <= 0 || got > maxFieldChars {
+		t.Errorf("max_chars upper bound not applied: %d", got)
 	}
 	_, reported := call(t, session, "get_observation", map[string]any{"observation_id": "gen", "field": "metadata"})
 	if reported["redactions"] == nil {
@@ -423,5 +432,223 @@ func TestRenderRefusesOversizedResults(t *testing.T) {
 	filter := newRedactor()
 	if _, err := filter.render(map[string]string{"text": strings.Repeat("x", hardResponseBytes)}); err == nil || !strings.Contains(err.Error(), "narrow") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func rawValue(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestSummaryRedactsBefore140And500CharacterCuts(t *testing.T) {
+	st := seedStore(t)
+	key := "sk-" + strings.Repeat("B", 40)
+	title := strings.Repeat("a", 124) + " " + key + " ordinary ending"
+	message := strings.Repeat("e", 484) + " " + key + " ordinary ending"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	records := []store.IngestRecord{
+		{Type: store.RecordTrace, Trace: &store.Trace{ID: "redaction-edge", Name: "assistant.turn", SessionID: "redaction-session", Timestamp: at}},
+		{Type: store.RecordObservation, Observation: &store.Observation{ID: "redaction-generation", TraceID: "redaction-edge", Type: "GENERATION", Name: "model", Input: rawValue(t, map[string]any{"messages": []any{map[string]string{"role": "user", "content": title}}}), StartTime: at, EndTime: at}},
+		{Type: store.RecordObservation, Observation: &store.Observation{ID: "redaction-error", TraceID: "redaction-edge", Type: "SPAN", Name: "failed", Level: "ERROR", StatusMessage: message, StartTime: at, EndTime: at}},
+	}
+	if _, err := st.Ingest(context.Background(), records); err != nil {
+		t.Fatal(err)
+	}
+	session, _ := connectStore(t, st, "")
+	for _, name := range []string{"list_sessions", "recent_errors", "get_session_timeline", "list_traces", "slow_calls"} {
+		args := map[string]any{}
+		if name == "get_session_timeline" {
+			args["session_id"] = "redaction-session"
+		}
+		text, result := call(t, session, name, args)
+		if strings.Contains(text, key) || strings.Contains(text, "sk-B") {
+			t.Fatalf("%s retained a credential fragment", name)
+		}
+		if (name == "list_sessions" || name == "recent_errors" || name == "get_session_timeline") && result["redactions"] == nil {
+			t.Errorf("%s omitted redaction counts", name)
+		}
+	}
+	// The public store/HTTP path must retain its ordinary, unredacted preview.
+	listed, err := st.ListSessions(context.Background(), store.SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range listed.Data {
+		if row.ID == "redaction-session" {
+			found = true
+			if !strings.Contains(row.Title, "sk-B") {
+				t.Error("MCP-specific title filtering changed the unredacted store path")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing regression session")
+	}
+}
+
+func readFieldChunks(t *testing.T, session *mcp.ClientSession, tool string, args map[string]any, field string, first map[string]any) string {
+	t.Helper()
+	var joined strings.Builder
+	offset := 0
+	chunk := first
+	for {
+		if chunk == nil {
+			_, result := call(t, session, tool, args)
+			chunk = result[field].(map[string]any)
+		}
+		if got := int(chunk["offset"].(float64)); got != offset {
+			t.Fatalf("%s offset = %d, want %d", field, got, offset)
+		}
+		text := chunk["text"].(string)
+		joined.WriteString(text)
+		offset += len([]rune(text))
+		next, more := chunk["nextOffset"]
+		if !more {
+			if offset != int(chunk["totalChars"].(float64)) {
+				t.Fatalf("%s stopped at %d of %v", field, offset, chunk["totalChars"])
+			}
+			return joined.String()
+		}
+		if int(next.(float64)) != offset || len([]rune(text)) == 0 {
+			t.Fatalf("%s continuation does not advance: %v", field, chunk)
+		}
+		args["offset"] = offset
+		chunk = nil
+	}
+}
+
+func TestTraceLargeHeaderAndEveryScoreHaveBoundedContinuation(t *testing.T) {
+	st := seedStore(t)
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	key := "sk-" + strings.Repeat("C", 40)
+	metadata := json.RawMessage(`{"body":"` + strings.Repeat("界😀", 9000) + `","url":"https://x.test/?x=1&api_key=` + key + `"}`)
+	records := []store.IngestRecord{
+		{Type: store.RecordTrace, Trace: &store.Trace{ID: "large-header", Name: "large header", Metadata: metadata, Timestamp: at}},
+		{Type: store.RecordObservation, Observation: &store.Observation{ID: "large-node", TraceID: "large-header", Name: "work", Type: "SPAN", StartTime: at, EndTime: at}},
+	}
+	for position := range 125 {
+		comment := "ordinary score"
+		if position == 124 {
+			comment = strings.Repeat("score\\\"\n😀", 5000) + key
+		}
+		records = append(records, store.IngestRecord{Type: store.RecordScore, Score: &store.Score{
+			ID: fmt.Sprintf("score-%03d", position), TraceID: "large-header", Name: "quality", Value: 1, Comment: comment, Timestamp: at,
+		}})
+	}
+	if _, err := st.Ingest(context.Background(), records); err != nil {
+		t.Fatal(err)
+	}
+	session, _ := connectStore(t, st, "")
+	_, tree := call(t, session, "get_trace", map[string]any{"trace_id": "large-header", "limit": 1})
+	if tree["returned"].(float64) != 1 || tree["headerDetail"] == nil {
+		t.Fatalf("large header blocked the tree or lost its detail route: %v", tree)
+	}
+	omitted := fmt.Sprint(tree["headerFieldsOmitted"])
+	if !strings.Contains(omitted, "metadata") || !strings.Contains(omitted, "scores") {
+		t.Fatalf("header omissions not declared: %s", omitted)
+	}
+	text := readFieldChunks(t, session, "get_trace", map[string]any{"trace_id": "large-header", "field": "header", "max_chars": maxFieldChars}, "header", nil)
+	if strings.Contains(text, key) || strings.Contains(text, "sk-C") {
+		t.Fatal("header continuation leaked a credential")
+	}
+	var header traceHeader
+	if err := json.Unmarshal([]byte(text), &header); err != nil {
+		t.Fatalf("reassembled header is not JSON: %v", err)
+	}
+	if header.ScoreCount != 125 || len(header.Scores) != 125 {
+		t.Fatalf("scores silently omitted: %d / %d", len(header.Scores), header.ScoreCount)
+	}
+	var gotMetadata map[string]string
+	if err := json.Unmarshal(header.Metadata, &gotMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if gotMetadata["body"] != strings.Repeat("界😀", 9000) || !strings.Contains(gotMetadata["url"], "[REDACTED:") {
+		t.Fatal("metadata detail lost text or query credential redaction")
+	}
+	_, tail := call(t, session, "get_trace", map[string]any{"trace_id": "large-header", "field": "header", "max_chars": maxFieldChars, "from_end": true})
+	chunk := tail["header"].(map[string]any)
+	start := int(chunk["offset"].(float64))
+	if chunk["nextOffset"] != nil || chunk["text"].(string) != string([]rune(text)[start:]) {
+		t.Fatal("header suffix does not agree with forward continuation")
+	}
+}
+
+func TestObservationByteBudgetPreservesRedactedCharacterOffsets(t *testing.T) {
+	for name, unit := range map[string]string{"ascii": "x", "cjk": "界", "emoji": "😀", "escapes": "\"\\\n\t\x00"} {
+		t.Run(name, func(t *testing.T) {
+			st := seedStore(t)
+			at := time.Now().UTC().Format(time.RFC3339Nano)
+			key := "sk-" + strings.Repeat("D", 40)
+			raw := rawValue(t, strings.Repeat(unit, 22000)+" "+key+" suffix")
+			records := []store.IngestRecord{
+				{Type: store.RecordTrace, Trace: &store.Trace{ID: "window", Name: "window", Timestamp: at}},
+				{Type: store.RecordObservation, Observation: &store.Observation{ID: "window-span", TraceID: "window", Name: "work", Type: "SPAN", StartTime: at, EndTime: at, Input: raw, Output: raw, Metadata: raw, ModelParameters: raw}},
+			}
+			if _, err := st.Ingest(context.Background(), records); err != nil {
+				t.Fatal(err)
+			}
+			session, _ := connectStore(t, st, "")
+			_, all := call(t, session, "get_observation", map[string]any{"observation_id": "window-span", "max_chars": maxAllFieldsChars})
+			for field, resultName := range map[string]string{"input": "input", "output": "output", "metadata": "metadata", "model_parameters": "modelParameters"} {
+				chunk := all[resultName].(map[string]any)
+				if chunk["text"] == "" {
+					t.Fatalf("four-field budget left %s empty", field)
+				}
+				got := readFieldChunks(t, session, "get_observation", map[string]any{"observation_id": "window-span", "field": field, "max_chars": maxFieldChars}, resultName, chunk)
+				want := newRedactor().Text(string(raw))
+				if got != want {
+					t.Fatalf("%s continuation lost or duplicated redacted characters", field)
+				}
+			}
+			_, tail := call(t, session, "get_observation", map[string]any{"observation_id": "window-span", "field": "output", "max_chars": maxFieldChars, "from_end": true})
+			chunk := tail["output"].(map[string]any)
+			start := int(chunk["offset"].(float64))
+			want := []rune(newRedactor().Text(string(raw)))
+			if chunk["nextOffset"] != nil || chunk["text"].(string) != string(want[start:]) || len([]rune(chunk["text"].(string))) > maxFieldChars {
+				t.Fatal("byte-shortened suffix has incorrect offsets")
+			}
+			if tail["redactions"] == nil {
+				t.Fatal("redacted suffix lacks its redaction envelope")
+			}
+		})
+	}
+}
+
+func TestListBudgetIncludesEscapingAndRedactionEnvelope(t *testing.T) {
+	rows := make([]map[string]string, 50)
+	for position := range rows {
+		rows[position] = map[string]string{"name": strings.Repeat("界😀\"\\", 300), "token": "short-secret"}
+	}
+	filter := newRedactor()
+	result, err := fitResponseItems(rows, filter, func(items []map[string]string, cut int) any {
+		return struct {
+			page
+			Rows []map[string]string `json:"rows"`
+		}{newPage(len(rows), 0, len(items), cut), items}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := filter.render(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		page
+		Rows       []map[string]string `json:"rows"`
+		Redactions *Redactions         `json:"redactions"`
+	}
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(text) > hardResponseBytes || decoded.Returned == 0 || decoded.Returned >= len(rows) ||
+		decoded.NextOffset == nil || *decoded.NextOffset != decoded.Returned || decoded.Redactions == nil ||
+		decoded.Redactions.Count != decoded.Returned || strings.Contains(text, "short-secret") {
+		t.Fatalf("invalid byte-fitted list: bytes=%d page=%+v redactions=%+v", len(text), decoded.page, decoded.Redactions)
 	}
 }

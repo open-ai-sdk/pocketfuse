@@ -206,6 +206,9 @@ type SessionFilter struct {
 	Limit   int
 	// Offset, when set, replaces Page for callers that page by row.
 	Offset int
+	// TitleFilter runs on the complete opening message before its list preview.
+	// Nil preserves the original text for HTTP/UI readers.
+	TitleFilter func(string) string
 }
 
 type ScoreFilter struct {

@@ -210,7 +210,7 @@ func clipTitle(text string) string {
 
 // sessionSummaries fills the fields of a session list row a reader scans for:
 // what the conversation is about and whether anything failed.
-func (s *Store) sessionSummaries(ctx context.Context, sessions []Session) error {
+func (s *Store) sessionSummaries(ctx context.Context, sessions []Session, filter func(string) string) error {
 	for position := range sessions {
 		session := &sessions[position]
 		var input nullableString
@@ -222,7 +222,11 @@ func (s *Store) sessionSummaries(ctx context.Context, sessions []Session) error 
 			return fmt.Errorf("read session title: %w", err)
 		}
 		if err == nil {
-			session.Title = clipTitle(parseLLMExchange(rawJSON(input), nil).UserText)
+			text := parseLLMExchange(rawJSON(input), nil).UserText
+			if filter != nil {
+				text = filter(text)
+			}
+			session.Title = clipTitle(text)
 		}
 		if err := s.db.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM observations
