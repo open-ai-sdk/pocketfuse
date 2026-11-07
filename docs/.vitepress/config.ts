@@ -28,6 +28,8 @@ export default defineConfig({
         items: [
           { text: 'Getting started', link: '/guide/getting-started' },
           { text: 'Ingesting traces', link: '/guide/ingestion' },
+          { text: 'Reading traces', link: '/guide/reading-traces' },
+          { text: 'MCP for AI agents', link: '/guide/mcp' },
           { text: 'Docker & Compose', link: '/guide/docker' },
           { text: 'Development', link: '/guide/development' },
         ],

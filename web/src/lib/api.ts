@@ -22,7 +22,10 @@ export type Trace = {
   observationCount?: number
   totalCost?: number
   totalTokens?: number
+  models?: string[]
   tags?: string[]
+  /** The trace told as a story; absent for a plain request. */
+  turn?: Turn
 }
 
 export type Observation = {
@@ -47,7 +50,141 @@ export type Observation = {
   level?: string
   statusMessage?: string
   cost?: number
+  /** The end the sender recorded, when the span was extended to cover a child. */
+  reportedEndTime?: string
+  /** What the span means to a reader: model_call, tool, turn, wake_turn, job, request, span. */
+  role?: string
+  /** The name a reader should see: the model of a call, the tool of a tool span. */
+  label?: string
+  /** The span this one duplicates: nested spans of one provider call fold together. */
+  mergedInto?: string
+  mergedSpans?: string[]
 }
+
+export type TokenUsage = {
+  input?: number
+  cachedInput?: number
+  output?: number
+  reasoning?: number
+  total?: number
+}
+
+/** A bounded text; shorter than totalChars when clipped. */
+export type Preview = { text: string; totalChars: number }
+
+export type ToolCall = {
+  id?: string
+  name: string
+  args?: string
+  result?: string
+  error?: string
+  /** The tool's own span, when the sender recorded one. */
+  spanId?: string
+  durationMs?: number
+}
+
+export type TurnStep = {
+  observationId: string
+  role: string
+  label: string
+  name?: string
+  startTime?: string
+  offsetMs: number
+  durationMs: number
+  pending?: boolean
+  level?: string
+  statusMessage?: string
+  model?: string
+  /** A model call outside the turn's conversation, such as a title generator. */
+  side?: boolean
+  usage: TokenUsage
+  cost?: number
+  finishReason?: string
+  text?: Preview
+  toolCalls?: ToolCall[]
+}
+
+export type TurnLink = { traceId: string; observationId: string; tool: string }
+
+export type Turn = {
+  traceId: string
+  kind: string
+  name?: string
+  rootId?: string
+  agentId?: string
+  jobId?: string
+  planId?: string
+  startTime?: string
+  endTime?: string
+  durationMs: number
+  status?: string
+  errorCount?: number
+  statusMessage?: string
+  usage: TokenUsage
+  cost?: number
+  modelCalls: number
+  toolCalls: number
+  failedTools?: number
+  userMessage?: Preview
+  reply?: Preview
+  steps: TurnStep[]
+  spawnedBy?: TurnLink
+  overlaps?: boolean
+}
+
+export type StoryRequest = {
+  traceId: string
+  name?: string
+  startTime?: string
+  durationMs: number
+  status?: string
+  /** A time match: no identifier connects it to this session. */
+  unlinked?: boolean
+}
+
+export type StoryActivity = {
+  startTime?: string
+  endTime?: string
+  errorCount?: number
+  requests: StoryRequest[]
+}
+
+export type StoryItem = { type: 'turn' | 'activity'; turn?: Turn; activity?: StoryActivity }
+
+export type StoryTotals = {
+  turns: number
+  modelCalls: number
+  toolCalls: number
+  failedTools: number
+  errors: number
+  usage: TokenUsage
+  cost?: number
+  startTime?: string
+  endTime?: string
+  durationMs: number
+}
+
+export type Session = {
+  id: string
+  projectId?: string
+  name?: string
+  userId?: string
+  createdAt?: string
+  lastUpdatedAt?: string
+  traceCount?: number
+  /** The conversation's opening message. */
+  title?: string
+  errorCount?: number
+}
+
+export type SessionStory = Session & {
+  totals: StoryTotals
+  items: StoryItem[]
+  hiddenNoise: number
+  omittedTraces?: number
+}
+
+export type RelatedTraces = { sameSession: Trace[]; overlapping: Trace[] }
 
 export type Paginated<T> = {
   data: T[]
@@ -75,6 +212,9 @@ export type TraceFilters = {
   traceId?: string
   observationId?: string
   type?: string
+  sessionId?: string
+  /** 'hide' leaves out routine polling and maintenance traces. */
+  noise?: 'hide'
   from?: string
   to?: string
   page?: number
@@ -129,6 +269,14 @@ function normalizeObservation(raw: unknown): Observation {
     metadata: asRecord(item.metadata),
     usage: asRecord(item.usage ?? item.usageDetails ?? item.usage_details),
     model: stringValue(item, 'model', 'modelName'),
+    modelParameters: asRecord(item.modelParameters ?? item.model_parameters),
+    reportedEndTime: stringValue(item, 'reportedEndTime'),
+    role: stringValue(item, 'role'),
+    label: stringValue(item, 'label'),
+    mergedInto: stringValue(item, 'mergedInto'),
+    mergedSpans: Array.isArray(item.mergedSpans)
+      ? item.mergedSpans.filter((id): id is string => typeof id === 'string')
+      : undefined,
     promptTokens: numberValue(item, 'promptTokens', 'prompt_tokens'),
     completionTokens: numberValue(item, 'completionTokens', 'completion_tokens'),
     totalTokens: numberValue(item, 'totalTokens', 'total_tokens'),
@@ -175,6 +323,10 @@ function normalizeTrace(raw: unknown): Trace {
       numberValue(item, 'observationCount', 'observation_count') ?? observations?.length,
     totalCost: numberValue(item, 'totalCost', 'total_cost', 'cost'),
     totalTokens: numberValue(item, 'totalTokens', 'total_tokens'),
+    models: Array.isArray(item.models)
+      ? item.models.filter((model): model is string => typeof model === 'string')
+      : undefined,
+    turn: item.turn as Turn | undefined,
   }
 }
 
@@ -261,8 +413,26 @@ export async function getObservations(filters: TraceFilters = {}): Promise<Pagin
   return normalizePage(payload, normalizeObservation, page, limit)
 }
 
-export async function getSessions(): Promise<Paginated<Record<string, unknown>>> {
-  return request<Paginated<Record<string, unknown>>>('/api/sessions')
+export async function getSessions(page: number, limit: number): Promise<Paginated<Session>> {
+  return request<Paginated<Session>>(`/api/sessions?page=${page}&limit=${limit}`)
+}
+
+export async function getSessionStory(
+  sessionId: string,
+  hideNoise: boolean,
+): Promise<SessionStory> {
+  const payload = await request<SessionStory>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/story${hideNoise ? '?noise=hide' : ''}`,
+  )
+  return { ...payload, items: payload.items ?? [] }
+}
+
+export async function getRelatedTraces(traceId: string): Promise<RelatedTraces> {
+  const payload = await request<RelatedTraces>(`/api/traces/${encodeURIComponent(traceId)}/related`)
+  return {
+    sameSession: (payload.sameSession ?? []).map(normalizeTrace),
+    overlapping: (payload.overlapping ?? []).map(normalizeTrace),
+  }
 }
 
 export async function getScores(filters: TraceFilters = {}): Promise<Paginated<Score>> {

@@ -15,7 +15,11 @@ func (s *Store) ListTraces(ctx context.Context, filter TraceFilter) (Page[Trace]
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM traces WHERE "+where, args...).Scan(&total); err != nil {
 		return Page[Trace]{}, fmt.Errorf("count traces: %w", err)
 	}
-	args = append(args, limit, (page-1)*limit)
+	offset := (page - 1) * limit
+	if filter.Offset > 0 {
+		offset = filter.Offset
+	}
+	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, name, user_id, session_id, environment, release, version,
 		       input, output, metadata, tags, public, timestamp, start_time, end_time,
@@ -38,10 +42,23 @@ func (s *Store) ListTraces(ctx context.Context, filter TraceFilter) (Page[Trace]
 	if err := rows.Err(); err != nil {
 		return Page[Trace]{}, fmt.Errorf("iterate traces: %w", err)
 	}
+	// The store runs on one connection, so the rows must be closed first.
+	if err := rows.Close(); err != nil {
+		return Page[Trace]{}, fmt.Errorf("close traces: %w", err)
+	}
+	if err := s.attachSummaries(ctx, data); err != nil {
+		return Page[Trace]{}, err
+	}
 	return Page[Trace]{Data: data, Total: total, Page: page, Limit: limit}, nil
 }
 
+// GetTrace returns a trace with its spans and story, or sql.ErrNoRows.
 func (s *Store) GetTrace(ctx context.Context, id string) (*Trace, error) {
+	return s.GetTraceWith(ctx, id, traceDetailTurn)
+}
+
+// GetTraceWith is GetTrace with bounds on the text copied into the story.
+func (s *Store) GetTraceWith(ctx context.Context, id string, options TurnOptions) (*Trace, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, project_id, name, user_id, session_id, environment, release, version,
 		       input, output, metadata, tags, public, timestamp, start_time, end_time,
@@ -58,17 +75,10 @@ func (s *Store) GetTrace(ctx context.Context, id string) (*Trace, error) {
 	if err != nil {
 		return nil, err
 	}
+	summarizeTrace(&value, observations)
+	annotateObservations(observations)
 	value.Observations = observations
-	value.ObservationCount = len(observations)
-	for _, observation := range observations {
-		if strings.EqualFold(observation.Level, "error") || strings.EqualFold(observation.Level, "fatal") {
-			value.Status = "error"
-			break
-		}
-	}
-	if value.Status == "" && len(observations) > 0 {
-		value.Status = "success"
-	}
+	value.Turn = buildTurn(&value, observations, options)
 	return &value, nil
 }
 
@@ -112,7 +122,11 @@ func (s *Store) ListSessions(ctx context.Context, filter SessionFilter) (Page[Se
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE "+where, args...).Scan(&total); err != nil {
 		return Page[Session]{}, fmt.Errorf("count sessions: %w", err)
 	}
-	args = append(args, limit, (page-1)*limit)
+	offset := (page - 1) * limit
+	if filter.Offset > 0 {
+		offset = filter.Offset
+	}
+	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_id, name, user_id, metadata, created_at, last_updated_at
 		FROM sessions WHERE `+where+`
@@ -133,7 +147,47 @@ func (s *Store) ListSessions(ctx context.Context, filter SessionFilter) (Page[Se
 	if err := rows.Err(); err != nil {
 		return Page[Session]{}, fmt.Errorf("iterate sessions: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return Page[Session]{}, fmt.Errorf("close sessions: %w", err)
+	}
+	if err := s.attachSessionCounts(ctx, data); err != nil {
+		return Page[Session]{}, err
+	}
+	if err := s.sessionSummaries(ctx, data); err != nil {
+		return Page[Session]{}, err
+	}
 	return Page[Session]{Data: data, Total: total, Page: page, Limit: limit}, nil
+}
+
+func (s *Store) attachSessionCounts(ctx context.Context, sessions []Session) error {
+	if len(sessions) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(sessions))
+	for _, session := range sessions {
+		args = append(args, session.ID)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT session_id, COUNT(*) FROM traces WHERE session_id IN (`+placeholders(len(args))+`) GROUP BY session_id`, args...)
+	if err != nil {
+		return fmt.Errorf("count session traces: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	counts := make(map[string]int, len(sessions))
+	for rows.Next() {
+		var id string
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return fmt.Errorf("scan session count: %w", err)
+		}
+		counts[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate session counts: %w", err)
+	}
+	for position := range sessions {
+		sessions[position].TraceCount = counts[sessions[position].ID]
+	}
+	return nil
 }
 
 func (s *Store) ListScores(ctx context.Context, filter ScoreFilter) (Page[Score], error) {
@@ -201,8 +255,22 @@ func traceWhere(filter TraceFilter) (string, []any) {
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(filter.Name); value != "" {
-		conditions = append(conditions, "unicode_contains(name, ?)")
+		conditions = append(conditions, "(unicode_contains(name, ?) OR id LIKE ?)")
+		args = append(args, value, value+"%")
+	}
+	if value := strings.TrimSpace(filter.SessionID); value != "" {
+		conditions = append(conditions, "session_id = ?")
 		args = append(args, value)
+	}
+	if value := strings.TrimSpace(filter.UserID); value != "" {
+		conditions = append(conditions, "user_id = ?")
+		args = append(args, value)
+	}
+	if filter.HideNoise {
+		conditions = append(conditions, noiseExclusion)
+	}
+	if condition := statusCondition(filter.Status); condition != "" {
+		conditions = append(conditions, condition)
 	}
 	appendRange(&conditions, &args, "timestamp", filter.From, filter.To)
 	return strings.Join(conditions, " AND "), args
@@ -350,9 +418,11 @@ func scanObservation(row scanner) (Observation, error) {
 	value.Metadata = rawJSON(metadata)
 	value.Model = stringValue(model)
 	value.ModelParameters = rawJSON(modelParameters)
-	value.Usage = rawJSON(usage)
+	value.Usage = NormalizeUsage(rawJSON(usage))
+	value.Cost = metadataCost(value.Metadata)
 	value.Level = stringValue(level)
-	value.StatusMessage = stringValue(statusMessage)
+	// Rows ingested earlier may hold a debug-formatted empty Option.
+	value.StatusMessage = optionalValue(stringValue(statusMessage))
 	value.Version = stringValue(version)
 	value.Environment = stringValue(environment)
 	value.StartTime = scanTimestamp(startTime)

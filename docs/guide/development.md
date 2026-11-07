@@ -44,7 +44,8 @@ make check   # frontend build, go test ./..., go vet ./...
 ```
 cmd/pocketfuse        main entry
 internal/server      HTTP API + OTLP decoding
-internal/store       SQLite persistence
+internal/store       SQLite persistence, turn and session stories
+internal/mcpserver   MCP tools for AI agents
 web/                 React SPA (TanStack Router/Query/Table, tailwind, vite-plus)
 docs/                This site (VitePress)
 ```

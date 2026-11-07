@@ -72,6 +72,18 @@ type Trace struct {
 	Latency          float64         `json:"latency,omitempty"`
 	Status           string          `json:"status,omitempty"`
 	ObservationCount int             `json:"observationCount,omitempty"`
+	// TotalTokens and TotalCost are nil when no span reported them: unknown,
+	// not zero. One LLM call recorded on nested spans counts once.
+	TotalTokens *float64 `json:"totalTokens,omitempty"`
+	TotalCost   *float64 `json:"totalCost,omitempty"`
+	Models      []string `json:"models,omitempty"`
+	// Turn tells the trace as a story; set on trace detail, absent for a plain request.
+	Turn *Turn `json:"turn,omitempty"`
+
+	// Partial marks an OTLP batch without the trace's root span, whose name and
+	// timestamp must not replace those of the root.
+	Partial       bool `json:"-"`
+	hasGeneration bool
 
 	// Observations is populated for the trace detail endpoint.
 	Observations []Observation `json:"observations,omitempty"`
@@ -101,6 +113,19 @@ type Observation struct {
 	CreatedAt           string          `json:"createdAt,omitempty"`
 	UpdatedAt           string          `json:"updatedAt,omitempty"`
 	Duration            float64         `json:"duration,omitempty"`
+	// Cost is what the sender reported; nil means unknown.
+	Cost *float64 `json:"cost,omitempty"`
+	// ReportedEndTime is the end the sender recorded, set only when EndTime
+	// was extended to cover a child that outlived this span.
+	ReportedEndTime string `json:"reportedEndTime,omitempty"`
+	// Role and Label say what the span means to a reader; set on trace detail.
+	Role  string `json:"role,omitempty"`
+	Label string `json:"label,omitempty"`
+	// MergedInto names the span this one duplicates as one model call, and
+	// MergedSpans lists the spans folded into this one.
+	MergedInto  string   `json:"mergedInto,omitempty"`
+	MergedSpans []string `json:"mergedSpans,omitempty"`
+	hasPayload  bool
 }
 
 // Session is a grouping of traces as returned by the sessions list.
@@ -112,6 +137,11 @@ type Session struct {
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt     string          `json:"createdAt,omitempty"`
 	LastUpdatedAt string          `json:"lastUpdatedAt,omitempty"`
+	TraceCount    int             `json:"traceCount,omitempty"`
+	// Title and ErrorCount are derived for lists: the opening message and the
+	// failed spans.
+	Title      string `json:"title,omitempty"`
+	ErrorCount int    `json:"errorCount,omitempty"`
 }
 
 // Score is a numeric or categorical evaluation attached to a trace or
@@ -139,12 +169,20 @@ type Page[T any] struct {
 }
 
 type TraceFilter struct {
-	Project string
-	Name    string
-	From    string
-	To      string
-	Page    int
-	Limit   int
+	Project   string
+	Name      string
+	SessionID string
+	UserID    string
+	From      string
+	To        string
+	// Status is one of StatusError, StatusPending or StatusFinished.
+	Status string
+	// HideNoise leaves out routine polling and maintenance traces.
+	HideNoise bool
+	Page      int
+	Limit     int
+	// Offset, when set, replaces Page for callers that page by row.
+	Offset int
 }
 
 type ObservationFilter struct {
@@ -166,6 +204,8 @@ type SessionFilter struct {
 	To      string
 	Page    int
 	Limit   int
+	// Offset, when set, replaces Page for callers that page by row.
+	Offset int
 }
 
 type ScoreFilter struct {
@@ -281,7 +321,10 @@ func (s *Store) init(ctx context.Context) error {
 			return fmt.Errorf("initialize schema: %w", err)
 		}
 	}
-	return nil
+	if err := s.backfillCorrelation(ctx); err != nil {
+		return err
+	}
+	return s.repairTraceTimestamps(ctx)
 }
 
 var schemaStatements = []string{
@@ -332,6 +375,8 @@ var schemaStatements = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS observations_trace_start_idx ON observations(trace_id, start_time, id)`,
 	`CREATE INDEX IF NOT EXISTS observations_project_start_idx ON observations(project_id, start_time, id)`,
+	`CREATE INDEX IF NOT EXISTS observations_signal_idx ON observations(trace_id) WHERE ` + signalCondition,
+	`CREATE INDEX IF NOT EXISTS traces_timestamp_idx ON traces(timestamp)`,
 	`CREATE TABLE IF NOT EXISTS sessions (
 		id VARCHAR PRIMARY KEY,
 		project_id VARCHAR NOT NULL DEFAULT '',
@@ -456,7 +501,7 @@ func upsertTrace(ctx context.Context, tx *sql.Tx, value Trace) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			project_id = COALESCE(NULLIF(excluded.project_id, ''), traces.project_id),
-			name = COALESCE(NULLIF(excluded.name, ''), traces.name),
+			name = CASE WHEN ? AND traces.name <> '' THEN traces.name ELSE COALESCE(NULLIF(excluded.name, ''), traces.name) END,
 			user_id = COALESCE(NULLIF(excluded.user_id, ''), traces.user_id),
 			session_id = COALESCE(NULLIF(excluded.session_id, ''), traces.session_id),
 			environment = COALESCE(NULLIF(excluded.environment, ''), traces.environment),
@@ -467,7 +512,7 @@ func upsertTrace(ctx context.Context, tx *sql.Tx, value Trace) error {
 			metadata = COALESCE(excluded.metadata, traces.metadata),
 			tags = COALESCE(excluded.tags, traces.tags),
 			public = excluded.public,
-			timestamp = COALESCE(NULLIF(excluded.timestamp, ''), traces.timestamp),
+			timestamp = CASE WHEN ? AND traces.timestamp <> '' THEN traces.timestamp ELSE COALESCE(NULLIF(excluded.timestamp, ''), traces.timestamp) END,
 			start_time = COALESCE(NULLIF(excluded.start_time, ''), traces.start_time),
 			end_time = COALESCE(NULLIF(excluded.end_time, ''), traces.end_time),
 			created_at = COALESCE(NULLIF(traces.created_at, ''), excluded.created_at),
@@ -490,6 +535,8 @@ func upsertTrace(ctx context.Context, tx *sql.Tx, value Trace) error {
 		value.EndTime,
 		value.CreatedAt,
 		value.UpdatedAt,
+		value.Partial,
+		value.Partial,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert trace %q: %w", value.ID, err)

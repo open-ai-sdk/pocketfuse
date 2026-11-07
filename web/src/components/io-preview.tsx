@@ -1,98 +1,167 @@
-import { Check, Copy } from 'lucide-react'
-import { useState } from 'react'
+import { Check, ChevronRight, Copy, TriangleAlert, Wrench } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import {
+  parseConversation,
+  parseModelOutput,
+  type DisplayMessage,
+  type MessagePart,
+} from '../lib/llm-messages'
 import { cn, prettyJson } from '../lib/utils'
 import { Badge, Button } from './ui'
 
-// IO preview: Formatted view detects ChatML
-// message arrays (or {messages: [...]}) and renders chat bubbles; anything
-// else renders as a key-value table. Raw is pretty-printed JSON. Data is
-// already in-memory so parsing is synchronous and size-gated.
+// IO preview: a prompt reads as a conversation, latest messages first in view,
+// with system prompts and earlier history one click away. A model's answer reads
+// as text and tool calls. Anything else is a key-value table, and Raw is always
+// the JSON as stored.
 
-type ChatMessage = {
-  role?: string
-  name?: string
-  content?: unknown
-  toolCalls?: unknown
-}
+const MAX_RENDER_CHARS = 600_000
+// How much of a long prompt shows before asking: the end is what changed.
+const RECENT_MESSAGES = 6
+const LONG_TEXT_CHARS = 1200
 
-const MAX_RENDER_CHARS = 300_000
-
-function messageContentText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content))
-    return content
-      .map((part) => {
-        if (part !== null && typeof part === 'object' && !Array.isArray(part)) {
-          const fields = part as Record<string, unknown>
-          return typeof fields.text === 'string'
-            ? fields.text
-            : typeof fields.content === 'string'
-              ? fields.content
-              : JSON.stringify(part)
-        }
-        return typeof part === 'string' ? part : JSON.stringify(part)
-      })
-      .filter((part): part is string => typeof part === 'string')
-      .join('\n')
-  return content === undefined || content === null ? '' : JSON.stringify(content, null, 2)
-}
-
-// Detects ChatML-ish input: an array of {role|content} objects, or a single
-// message, or {messages: [...]}.
-function extractMessages(value: unknown): ChatMessage[] | null {
-  const asMessage = (item: unknown): ChatMessage | null => {
-    if (item === null || typeof item !== 'object' || Array.isArray(item)) return null
-    const message = item as ChatMessage
-    return typeof message.role === 'string' || message.content !== undefined ? message : null
+export function ExpandableText({
+  value,
+  collapsed = false,
+}: {
+  value: string
+  collapsed?: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const long = value.length > LONG_TEXT_CHARS
+  if (collapsed && !expanded) {
+    return (
+      <button
+        type='button'
+        onClick={() => setExpanded(true)}
+        className='inline-flex items-center gap-1 text-[11px] text-content-tertiary hover:text-content-brand'
+      >
+        <ChevronRight className='size-3' />
+        Show {value.length.toLocaleString()} characters
+      </button>
+    )
   }
-
-  let candidates: unknown[] | null = null
-  if (Array.isArray(value)) {
-    candidates = value
-  } else if (value !== null && typeof value === 'object') {
-    if ('messages' in value && Array.isArray(value.messages)) candidates = value.messages
-    else if (asMessage(value)) candidates = [value]
-  }
-  if (!candidates || candidates.length === 0) return null
-  const messages = candidates.map(asMessage)
-  if (!messages.every((m): m is ChatMessage => m !== null) || !messages.some((m) => m.role))
-    return null
-  return messages
-}
-
-function ChatBubble({ message }: { message: ChatMessage }) {
-  const role = (message.role ?? 'message').toLowerCase()
-  const tone =
-    role === 'assistant'
-      ? 'violet'
-      : role === 'system'
-        ? 'amber'
-        : role === 'tool'
-          ? 'blue'
-          : 'neutral'
   return (
-    <div className='rounded-[3px] border border-border-primary bg-surface-primary px-3 py-2'>
-      <div className='mb-1 flex items-center gap-1.5'>
-        <Badge tone={tone} className='rounded-[3px] px-1 font-mono text-[9.5px] uppercase'>
-          {message.name ?? message.role ?? 'message'}
-        </Badge>
-      </div>
+    <div>
       <p className='whitespace-pre-wrap break-words text-[11.5px] leading-5 text-content-primary'>
-        {messageContentText(message.content) || (
-          <span className='text-content-tertiary'>Empty content</span>
-        )}
+        {long && !expanded ? `${value.slice(0, LONG_TEXT_CHARS)}…` : value}
       </p>
-      {message.toolCalls !== undefined && (
-        <pre className='mt-1.5 overflow-auto rounded-[3px] border border-border-primary bg-surface-tertiary p-2 font-mono text-[10.5px] text-content-secondary'>
-          {prettyJson(message.toolCalls)}
-        </pre>
+      {long && !expanded && (
+        <button
+          type='button'
+          onClick={() => setExpanded(true)}
+          className='mt-1 text-[10.5px] font-medium text-content-brand hover:underline'
+        >
+          Show all {value.length.toLocaleString()} characters
+        </button>
       )}
     </div>
   )
 }
 
-// Non-chat fallback: top-level object → key-value table (same as
-// JsonInputOutputView); arrays/primitives → pretty JSON.
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className='overflow-auto whitespace-pre-wrap break-words rounded-[3px] border border-border-primary bg-surface-tertiary p-2 font-mono text-[10.5px] leading-4 text-content-secondary'>
+      {prettyJson(value) || '—'}
+    </pre>
+  )
+}
+
+function Part({ part, collapsed }: { part: MessagePart; collapsed: boolean }) {
+  if (part.kind === 'text') return <ExpandableText value={part.text} collapsed={collapsed} />
+  if (part.kind === 'tool_call') {
+    return (
+      <div className='flex flex-col gap-1'>
+        <span className='inline-flex items-center gap-1 font-mono text-[10.5px] font-medium text-content-warning'>
+          <Wrench className='size-3' />
+          {part.name}
+        </span>
+        <JsonBlock value={part.args} />
+      </div>
+    )
+  }
+  return (
+    <div className='flex flex-col gap-1'>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 font-mono text-[10.5px] font-medium',
+          part.error ? 'text-content-error' : 'text-content-secondary',
+        )}
+      >
+        {part.error ? <TriangleAlert className='size-3' /> : <Wrench className='size-3' />}
+        {part.name} {part.error ? 'failed' : 'returned'}
+      </span>
+      <JsonBlock value={part.value} />
+    </div>
+  )
+}
+
+function roleTone(role: string) {
+  if (role === 'assistant') return 'violet'
+  if (role === 'system' || role === 'developer') return 'amber'
+  if (role === 'tool') return 'blue'
+  return 'neutral'
+}
+
+function Bubble({ message }: { message: DisplayMessage }) {
+  const role = message.role.toLowerCase()
+  const collapsed = role === 'system' || role === 'developer'
+  const onlyResults =
+    message.parts.length > 0 && message.parts.every((p) => p.kind === 'tool_result')
+  return (
+    <div className='rounded-[3px] border border-border-primary bg-surface-primary px-3 py-2'>
+      <Badge
+        tone={onlyResults ? 'blue' : roleTone(role)}
+        className='mb-1 rounded-[3px] px-1 font-mono text-[9.5px] uppercase'
+      >
+        {onlyResults ? 'tool result' : (message.name ?? message.role)}
+      </Badge>
+      {message.parts.length === 0 ? (
+        <p className='text-[11px] text-content-tertiary'>Empty content</p>
+      ) : (
+        <div className='flex flex-col gap-2'>
+          {message.parts.map((part, index) => (
+            <Part key={index} part={part} collapsed={collapsed} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConversationView({ messages, tools }: { messages: DisplayMessage[]; tools: string[] }) {
+  const [showAll, setShowAll] = useState(false)
+  const [showTools, setShowTools] = useState(false)
+  const hidden = showAll ? 0 : Math.max(0, messages.length - RECENT_MESSAGES)
+  return (
+    <div className='flex flex-col gap-2'>
+      {tools.length > 0 && (
+        <button
+          type='button'
+          onClick={() => setShowTools((value) => !value)}
+          className='text-left text-[10.5px] text-content-tertiary hover:text-content-secondary'
+        >
+          {showTools
+            ? tools.join(', ')
+            : `${tools.length} tool${tools.length === 1 ? '' : 's'} offered to the model`}
+        </button>
+      )}
+      {hidden > 0 && (
+        <button
+          type='button'
+          onClick={() => setShowAll(true)}
+          className='rounded-[3px] border border-dashed border-border-primary py-1.5 text-[10.5px] font-medium text-content-secondary hover:text-content-brand'
+        >
+          Show {hidden} earlier message{hidden === 1 ? '' : 's'}
+        </button>
+      )}
+      {messages.slice(hidden).map((message, index) => (
+        <Bubble key={hidden + index} message={message} />
+      ))}
+    </div>
+  )
+}
+
+// Non-chat fallback: top-level object as a key-value table; the rest as JSON.
 function JsonTable({ value }: { value: unknown }) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return (
@@ -140,9 +209,16 @@ export function IOPreview({
 }) {
   const [mode, setMode] = useState<'formatted' | 'raw'>('formatted')
   const [copied, setCopied] = useState(false)
-  const text = prettyJson(value)
+  const text = useMemo(() => prettyJson(value), [value])
   const oversized = text.length > MAX_RENDER_CHARS
-  const messages = mode === 'formatted' && !oversized ? extractMessages(value) : null
+  const conversation = useMemo(
+    () => (oversized ? undefined : parseConversation(value)),
+    [oversized, value],
+  )
+  const answer = useMemo(
+    () => (oversized ? undefined : parseModelOutput(value)),
+    [oversized, value],
+  )
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(text)
@@ -152,6 +228,12 @@ export function IOPreview({
       /* clipboard unavailable in non-secure contexts */
     }
   }
+  const empty = value === undefined || value === null
+  const raw = (
+    <pre className='overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-content-secondary'>
+      {text}
+    </pre>
+  )
 
   return (
     <section
@@ -183,7 +265,7 @@ export function IOPreview({
             ))}
           </div>
         </div>
-        {value !== undefined && value !== null && (
+        {!empty && (
           <Button
             variant='ghost'
             size='icon-xs'
@@ -195,25 +277,17 @@ export function IOPreview({
           </Button>
         )}
       </header>
-      <div className='max-h-96 overflow-auto p-3'>
-        {value === undefined || value === null ? (
+      <div className='p-3'>
+        {empty ? (
           <p className='py-2 text-center text-[11px] text-content-tertiary'>No data</p>
-        ) : oversized ? (
-          <pre className='overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-content-secondary'>
-            {text}
-          </pre>
-        ) : messages ? (
-          <div className='flex flex-col gap-2'>
-            {messages.map((message, index) => (
-              <ChatBubble key={index} message={message} />
-            ))}
-          </div>
-        ) : mode === 'formatted' ? (
-          <JsonTable value={value} />
+        ) : mode === 'raw' || oversized ? (
+          raw
+        ) : conversation ? (
+          <ConversationView messages={conversation.messages} tools={conversation.tools} />
+        ) : answer ? (
+          <Bubble message={answer} />
         ) : (
-          <pre className='overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-content-secondary'>
-            {text}
-          </pre>
+          <JsonTable value={value} />
         )}
       </div>
     </section>

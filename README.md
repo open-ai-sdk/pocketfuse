@@ -47,6 +47,10 @@ Everything else lives in the [docs site](https://open-ai-sdk.github.io/pocketfus
   published images, version pinning, local builds
 - [Ingesting traces](https://open-ai-sdk.github.io/pocketfuse/guide/ingestion) —
   OpenTelemetry/OTLP and the JSON API
+- [Reading traces](https://open-ai-sdk.github.io/pocketfuse/guide/reading-traces) —
+  sessions as conversations, turns, model calls
+- [MCP for AI agents](https://open-ai-sdk.github.io/pocketfuse/guide/mcp) —
+  read-only debugging tools at `/mcp`
 - [HTTP API](https://open-ai-sdk.github.io/pocketfuse/api/) — endpoint reference
 - [Development](https://open-ai-sdk.github.io/pocketfuse/guide/development) —
   live reload, checks, project layout

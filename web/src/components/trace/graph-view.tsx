@@ -3,7 +3,7 @@ import { Maximize, Minus, Plus } from 'lucide-react'
 import { cn, formatDuration } from '../../lib/utils'
 import { observationIsPending, type TreeNode } from '../../lib/trace-tree'
 import { Button } from '../ui'
-import { kindFor, toneDotVar } from './kinds'
+import { kindOf, toneDotVar } from './kinds'
 
 // Graph view: the observation tree laid out left→right by depth as an SVG
 // DAG. Column = depth, row = DFS arrival order within that column, edges
@@ -248,10 +248,10 @@ function GraphNode({
   onSelect: () => void
 }) {
   const observation = node.observation
-  const kind = kindFor(observation.type)
+  const kind = kindOf(observation)
   const pending = observationIsPending(observation)
   const error = observation.level?.toUpperCase() === 'ERROR'
-  const name = observation.name || 'Untitled observation'
+  const name = observation.label || observation.name || 'Untitled observation'
   const stroke = error
     ? 'var(--border-danger)'
     : selected

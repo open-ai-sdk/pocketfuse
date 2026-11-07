@@ -1,5 +1,13 @@
 import { queryOptions } from '@tanstack/react-query'
-import { getScores, getTrace, getTraces, type TraceFilters } from './api'
+import {
+  getRelatedTraces,
+  getScores,
+  getSessionStory,
+  getSessions,
+  getTrace,
+  getTraces,
+  type TraceFilters,
+} from './api'
 import { observationIsPending } from './trace-tree'
 
 // Shared queryOptions factories: route loaders ensureQueryData() with these
@@ -13,7 +21,11 @@ import { observationIsPending } from './trace-tree'
 export const TRACES_PAGE_SIZE = 25
 
 /** The exact key the traces list builds on first render (no filters). */
-export const TRACES_INITIAL_FILTERS: TraceFilters = { page: 1, limit: TRACES_PAGE_SIZE }
+export const TRACES_INITIAL_FILTERS: TraceFilters = {
+  page: 1,
+  limit: TRACES_PAGE_SIZE,
+  noise: 'hide',
+}
 
 export function tracesOptions(filters: TraceFilters) {
   return queryOptions({
@@ -46,5 +58,29 @@ export function traceScoresOptions(traceId: string) {
   return queryOptions({
     queryKey: ['scores', traceId],
     queryFn: () => getScores({ traceId, limit: 200 }),
+  })
+}
+
+export const SESSIONS_PAGE_SIZE = 25
+
+export function sessionsOptions(page: number) {
+  return queryOptions({
+    queryKey: ['sessions', page],
+    queryFn: () => getSessions(page, SESSIONS_PAGE_SIZE),
+    placeholderData: (previous) => previous,
+  })
+}
+
+export function sessionStoryOptions(sessionId: string, hideNoise: boolean) {
+  return queryOptions({
+    queryKey: ['session-story', sessionId, hideNoise],
+    queryFn: () => getSessionStory(sessionId, hideNoise),
+  })
+}
+
+export function relatedTracesOptions(traceId: string) {
+  return queryOptions({
+    queryKey: ['related-traces', traceId],
+    queryFn: () => getRelatedTraces(traceId),
   })
 }

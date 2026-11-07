@@ -44,3 +44,20 @@ IDs and timestamps are optional — the server generates them (`trace-…`,
 `obs-…`, `score-…`, `session-…`). Existing IDs upsert. Traces carrying
 `sessionId` auto-create the session. Bodies may be gzipped; the limit is
 32 MiB.
+
+## Linking traces into a session
+
+An OTLP trace joins a session through the first of `langfuse.trace.session_id`,
+`langfuse.session.id` or `session.id`. Without those, a `thread_id` attribute or
+a `{thread_id}` parameter in `http.route` matched against `url.path` places it in
+session `thread:<id>`. Traces with no such attribute stay unlinked; the UI can
+only show them as time matches, labelled as such.
+
+## What senders can attach
+
+A span with a failed status and no message takes its message from its events: an
+`exception.message`, or the text of a log event at `ERROR` level. Up to 20 events
+are kept under `otel.events` in the span's metadata.
+
+See [Reading traces](/guide/reading-traces) for how span names and payloads become
+turns.
