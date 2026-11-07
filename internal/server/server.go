@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-ai-sdk/pocketfuse/internal/mcpserver"
 	"github.com/open-ai-sdk/pocketfuse/internal/store"
 	"github.com/open-ai-sdk/pocketfuse/web"
 )
@@ -26,6 +27,9 @@ import (
 const (
 	Version        = "0.1.0"
 	maxRequestSize = 32 << 20
+	// The session page carries previews; the span panel holds the full text.
+	storyMessageChars = 8000
+	storyDetailChars  = 1200
 )
 
 type Server struct {
@@ -44,10 +48,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/traces/", s.traces)
 	mux.HandleFunc("/api/observations", s.observations)
 	mux.HandleFunc("/api/sessions", s.sessions)
+	mux.HandleFunc("/api/sessions/", s.sessions)
 	mux.HandleFunc("/api/scores", s.scores)
 	assets, _ := fs.Sub(web.Dist, "dist")
 	mux.Handle("/", spaHandler{assets: http.FS(assets)})
-	return cors(mux)
+	// MCP stays outside the wildcard CORS policy: it validates Origin itself,
+	// as the MCP transport requires, to stop DNS rebinding from a web page.
+	root := http.NewServeMux()
+	root.Handle("/mcp", mcpserver.NewHandler(s.Store, Version))
+	root.Handle("/", cors(mux))
+	return root
 }
 
 func cors(next http.Handler) http.Handler {
@@ -109,7 +119,8 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	// Health probes such as `wget --spider` send HEAD.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		methodNotAllowed(w)
 		return
 	}
@@ -125,11 +136,25 @@ func (s *Server) traces(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/traces")
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/api/traces")
 	if path != "" && path != "/" {
-		id, err := url.PathUnescape(strings.TrimPrefix(path, "/"))
+		rawID, wantRelated := strings.CutSuffix(strings.TrimPrefix(path, "/"), "/related")
+		id, err := url.PathUnescape(rawID)
 		if err != nil || id == "" {
 			writeError(w, http.StatusBadRequest, "invalid trace id")
+			return
+		}
+		if wantRelated {
+			related, err := s.Store.GetRelatedTraces(r.Context(), id)
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "trace not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, related)
 			return
 		}
 		trace, err := s.Store.GetTrace(r.Context(), id)
@@ -145,7 +170,7 @@ func (s *Server) traces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	result, err := s.Store.ListTraces(r.Context(), store.TraceFilter{Project: first(q.Get("project"), q.Get("projectId")), Name: q.Get("name"), From: q.Get("from"), To: q.Get("to"), Page: intQuery(q.Get("page")), Limit: intQuery(q.Get("limit"))})
+	result, err := s.Store.ListTraces(r.Context(), store.TraceFilter{Project: first(q.Get("project"), q.Get("projectId")), Name: q.Get("name"), SessionID: first(q.Get("sessionId"), q.Get("session_id")), UserID: first(q.Get("userId"), q.Get("user_id")), Status: q.Get("status"), HideNoise: q.Get("noise") == "hide", From: q.Get("from"), To: q.Get("to"), Page: intQuery(q.Get("page")), Limit: intQuery(q.Get("limit"))})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -173,6 +198,38 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	if path := strings.TrimPrefix(strings.TrimPrefix(r.URL.EscapedPath(), "/api/sessions"), "/"); path != "" {
+		rawID, wantStory := strings.CutSuffix(path, "/story")
+		id, err := url.PathUnescape(rawID)
+		if err != nil || id == "" {
+			writeError(w, http.StatusBadRequest, "invalid session id")
+			return
+		}
+		if wantStory {
+			story, err := s.Store.GetSessionStory(r.Context(), id, q.Get("noise") == "hide", store.TurnOptions{MessageChars: storyMessageChars, DetailChars: storyDetailChars})
+			if errors.Is(err, sql.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "session not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, story)
+			return
+		}
+		detail, err := s.Store.GetSessionDetail(r.Context(), id, q.Get("noise") == "hide")
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
+		return
+	}
 	result, err := s.Store.ListSessions(r.Context(), store.SessionFilter{Project: first(q.Get("project"), q.Get("projectId")), Name: q.Get("name"), UserID: first(q.Get("userId"), q.Get("user_id")), From: q.Get("from"), To: q.Get("to"), Page: intQuery(q.Get("page")), Limit: intQuery(q.Get("limit"))})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

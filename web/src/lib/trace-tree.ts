@@ -1,5 +1,46 @@
 import type { Observation } from './api'
 
+// The spans a reader sees. Nested spans of one provider call fold into one row;
+// `raw` shows every span as recorded. A folded span's children, if it has any,
+// move up to the row it folded into.
+export function visibleObservations(observations: Observation[], raw: boolean): Observation[] {
+  if (raw) return observations
+  const byId = new Map(observations.map((item) => [item.id, item]))
+  return observations
+    .filter((item) => !item.mergedInto)
+    .map((item) => {
+      const parent = item.parentObservationId
+      let target = parent ? byId.get(parent) : undefined
+      if (!target?.mergedInto) return item
+      const visited = new Set([item.id])
+      while (target?.mergedInto && !visited.has(target.id)) {
+        visited.add(target.id)
+        target = byId.get(target.mergedInto)
+      }
+      return target && !target.mergedInto && target.id !== item.id
+        ? { ...item, parentObservationId: target.id }
+        : item
+    })
+}
+
+export function displayName(observation: Observation) {
+  return observation.label || observation.name || 'Untitled observation'
+}
+
+export function observationHasError(observation: Observation) {
+  const level = observation.level?.toUpperCase()
+  return level === 'ERROR' || level === 'FATAL'
+}
+
+// Position of a timing bar inside a window, in percent. The smallest bar stays
+// visible, and a bar never runs past the window.
+export function barLayout(offsetMs: number, durationMs: number | undefined, windowMs: number) {
+  const span = Math.max(1, windowMs)
+  const left = Math.max(0, Math.min(100, (offsetMs / span) * 100))
+  const width = Math.max(0.5, Math.min(((durationMs ?? 0) / span) * 100, 100 - left))
+  return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }
+}
+
 // Observation tree helpers: build a parent→children forest then
 // flatten it for render
 // with ancestor guide-line flags per depth.

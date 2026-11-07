@@ -17,7 +17,15 @@ import {
 import { useMemo, useState } from 'react'
 import { type Trace, type TraceFilters, type TraceStatus } from '../lib/api'
 import { TRACES_PAGE_SIZE, tracesOptions } from '../lib/queries'
-import { cn, formatCost, formatDuration, formatRelative } from '../lib/utils'
+import {
+  cn,
+  formatCost,
+  formatDuration,
+  formatRelative,
+  formatTokens,
+  sumKnown,
+} from '../lib/utils'
+import { sessionLabel } from '../components/trace/linked-trace-list'
 import { Button, CardContent, Input, Skeleton } from '../components/ui'
 import {
   Table,
@@ -105,6 +113,44 @@ function TraceTable({ traces }: { traces: Trace[] }) {
         ),
       },
       {
+        id: 'thread',
+        header: 'Thread',
+        accessorFn: (trace) => trace.sessionId,
+        cell: ({ row }) =>
+          row.original.sessionId ? (
+            <Link
+              to='/sessions/$sessionId'
+              params={{ sessionId: row.original.sessionId }}
+              onClick={(event) => event.stopPropagation()}
+              className='block max-w-[140px] truncate text-xs text-content-brand hover:underline'
+            >
+              {sessionLabel(row.original.sessionId)}
+            </Link>
+          ) : (
+            <span className='text-xs text-content-tertiary'>—</span>
+          ),
+      },
+      {
+        id: 'model',
+        header: 'Model',
+        accessorFn: (trace) => trace.models?.join(', '),
+        cell: ({ getValue }) => (
+          <span className='block max-w-[140px] truncate text-xs text-content-secondary'>
+            {String(getValue() ?? '—')}
+          </span>
+        ),
+      },
+      {
+        id: 'tokens',
+        header: 'Tokens',
+        accessorFn: (trace) => trace.totalTokens,
+        cell: ({ getValue }) => (
+          <span className='font-mono text-xs tabular-nums text-content-secondary'>
+            {formatTokens(getValue() as number | undefined)}
+          </span>
+        ),
+      },
+      {
         id: 'latency',
         header: 'Latency',
         accessorFn: (trace) => trace.latency ?? trace.duration,
@@ -120,7 +166,7 @@ function TraceTable({ traces }: { traces: Trace[] }) {
         accessorFn: (trace) => trace.totalCost,
         cell: ({ getValue }) => (
           <span className='font-mono text-xs tabular-nums text-content-secondary'>
-            {formatCost(Number(getValue()) || undefined)}
+            {formatCost(getValue() as number | undefined)}
           </span>
         ),
       },
@@ -139,8 +185,13 @@ function TraceTable({ traces }: { traces: Trace[] }) {
   )
   const table = useReactTable({ data: traces, columns, getCoreRowModel: getCoreRowModel() })
   return (
-    <div className='overflow-x-auto'>
-      <Table className='w-full min-w-[800px]'>
+    <div
+      className='overflow-x-auto [&_[data-slot=table-container]]:overflow-visible'
+      role='region'
+      aria-label='Traces table; scroll horizontally for all columns'
+      tabIndex={0}
+    >
+      <Table className='w-full min-w-[1040px]'>
         <TableHeader>
           <TableRow className='border-b border-border-primary bg-surface-tertiary hover:bg-surface-tertiary'>
             {table.getHeaderGroups()[0].headers.map((header) => (
@@ -197,6 +248,8 @@ export function TracesPage() {
   const [project, setProject] = useState('')
   const [status, setStatus] = useState<TraceStatus | ''>('')
   const [timeRange, setTimeRange] = useState<TimeRangeId>('all')
+  // Routine polling and queue housekeeping bury agent runs, so they start hidden.
+  const [hideNoise, setHideNoise] = useState(true)
   const [page, setPage] = useState(1)
   // The filter rail is always visible on large screens; on small screens
   // this toggle collapses it back into the toolbar button.
@@ -205,6 +258,7 @@ export function TracesPage() {
     () => ({
       name: search || undefined,
       project: project || undefined,
+      noise: hideNoise ? 'hide' : undefined,
       from:
         rangeFromMs(timeRange) !== undefined
           ? new Date(rangeFromMs(timeRange)!).toISOString()
@@ -212,7 +266,7 @@ export function TracesPage() {
       page,
       limit: pageSize,
     }),
-    [search, project, timeRange, page],
+    [search, project, timeRange, page, hideNoise],
   )
   // The route loader ensures the initial (unfiltered) query; this read hits
   // the warm cache on first render and only fetches on filter changes.
@@ -225,7 +279,7 @@ export function TracesPage() {
     ? traces.reduce((totalValue, trace) => totalValue + (trace.latency ?? trace.duration ?? 0), 0) /
       traces.length
     : 0
-  const totalCost = traces.reduce((totalValue, trace) => totalValue + (trace.totalCost ?? 0), 0)
+  const totalCost = sumKnown(traces, (trace) => trace.totalCost)
   const errors = traces.filter((trace) => statusTone(trace.status) === 'red').length
   const visibleTraces = status
     ? traces.filter((trace) => statusTone(trace.status) === statusTone(status))
@@ -275,7 +329,7 @@ export function TracesPage() {
         }
       />
       <div className='flex flex-col gap-5 px-4 py-5 sm:px-6'>
-        <MetricStrip>
+        <MetricStrip className='min-[360px]:grid-cols-2 xl:grid-cols-4'>
           <MetricCell
             icon={Activity}
             label='Total traces'
@@ -297,7 +351,7 @@ export function TracesPage() {
           <MetricCell
             icon={Coins}
             label='Total cost'
-            value={traces.length ? formatCost(totalCost) : '—'}
+            value={formatCost(totalCost)}
             detail='Current page'
           />
         </MetricStrip>
@@ -442,6 +496,18 @@ export function TracesPage() {
                 />
               </div>
               <div className='flex items-center gap-2'>
+                <label className='flex cursor-pointer items-center gap-1.5 text-[11px] text-content-secondary'>
+                  <input
+                    type='checkbox'
+                    checked={hideNoise}
+                    onChange={(event) => {
+                      setHideNoise(event.target.checked)
+                      setPage(1)
+                    }}
+                    className='size-3.5 accent-[var(--content-brand)]'
+                  />
+                  Hide polling and queue housekeeping
+                </label>
                 <Button
                   variant='ghost'
                   size='icon-sm'

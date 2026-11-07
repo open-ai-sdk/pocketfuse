@@ -3,23 +3,19 @@ import { TraceDetailPage } from '../../pages/trace-detail-page'
 import { RouteError, TraceDetailSkeleton } from '../../pages/route-skeletons'
 import { traceOptions, traceScoresOptions } from '../../lib/queries'
 
-// `?obs=<id>` deep-links a specific observation; `?view=` and `?tab=`
-// deep-link the left-panel view (tree/timeline/graph) and the right-panel
-// detail tab. Defaults (tree / preview) stay out of the URL.
+// `?obs=<id>` deep-links a span; `?view=` picks the left pane (tree stays out of
+// the URL); `?raw=1` shows every span instead of folding nested provider calls.
 export const Route = createFileRoute('/traces/$traceId')({
   validateSearch: (
     search: Record<string, unknown>,
   ): {
     obs?: string
-    view?: 'tree' | 'timeline' | 'graph'
-    tab?: 'preview' | 'attributes' | 'scores' | 'log'
+    view?: 'graph' | 'log'
+    raw?: 1
   } => ({
     obs: typeof search.obs === 'string' && search.obs ? search.obs : undefined,
-    view: search.view === 'timeline' || search.view === 'graph' ? search.view : undefined,
-    tab:
-      search.tab === 'attributes' || search.tab === 'scores' || search.tab === 'log'
-        ? search.tab
-        : undefined,
+    view: search.view === 'graph' || search.view === 'log' ? search.view : undefined,
+    raw: search.raw === 1 || search.raw === '1' ? 1 : undefined,
   }),
   loader: ({ context, params }) =>
     Promise.all([

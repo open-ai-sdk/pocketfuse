@@ -1,13 +1,15 @@
 import { useMemo } from 'react'
 import { cn, formatDuration } from '../../lib/utils'
 import {
+  displayName,
   observationDurationMs,
+  observationHasError,
   observationIsPending,
   observationStartMs,
   observationTokens,
 } from '../../lib/trace-tree'
 import type { Observation } from '../../lib/api'
-import { kindFor } from './kinds'
+import { kindOf } from './kinds'
 
 // Log view: every observation in the trace as one chronological row —
 // the "scan the whole run" counterpart to the structured views. Clicking
@@ -52,10 +54,10 @@ export function TraceLogView({
         </p>
       ) : (
         rows.map((observation) => {
-          const kind = kindFor(observation.type)
+          const kind = kindOf(observation)
           const Icon = kind.icon
           const pending = observationIsPending(observation)
-          const error = observation.level?.toUpperCase() === 'ERROR'
+          const error = observationHasError(observation)
           const tokens = observationTokens(observation)
           const offset = Math.max(0, observationStartMs(observation) - originMs)
           const selected = selectedId === observation.id
@@ -90,7 +92,7 @@ export function TraceLogView({
                     error ? 'text-content-error' : 'text-content-primary',
                   )}
                 >
-                  {observation.name || 'Untitled observation'}
+                  {displayName(observation)}
                 </span>
                 <span className='shrink-0 text-[9.5px] uppercase tracking-wide text-content-tertiary'>
                   {kind.label}

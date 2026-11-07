@@ -58,7 +58,7 @@ export function MetricStrip({ children, className }: { children: ReactNode; clas
   return (
     <div
       className={cn(
-        'grid grid-cols-2 overflow-hidden rounded-[4px] border border-border-primary bg-surface-primary sm:grid-cols-4',
+        'grid grid-cols-1 overflow-hidden rounded-[4px] border border-border-primary bg-surface-primary min-[400px]:grid-cols-2 xl:grid-cols-4',
         className,
       )}
     >
@@ -88,13 +88,13 @@ export function MetricCell({
       )}
     >
       <div className='flex items-center justify-between gap-2'>
-        <span className='truncate text-[11px] font-medium text-content-secondary'>{label}</span>
+        <span className='break-words text-xs font-medium text-content-secondary'>{label}</span>
         {Icon && <Icon className='size-3.5 text-content-brand' aria-hidden='true' />}
       </div>
-      <p className='mt-1.5 truncate text-lg font-semibold tracking-[-0.02em] text-content-primary tabular-nums'>
+      <p className='mt-1.5 break-words text-lg font-semibold tracking-[-0.02em] text-content-primary tabular-nums'>
         {value}
       </p>
-      {detail && <p className='mt-0.5 truncate text-[10px] text-content-tertiary'>{detail}</p>}
+      {detail && <p className='mt-0.5 break-words text-xs text-content-tertiary'>{detail}</p>}
     </div>
   )
 }
@@ -167,6 +167,7 @@ export function StatusChip({ status, className }: { status?: string; className?:
       tone={tone}
       className={cn(
         'h-5 rounded-[3px] px-1.5 font-mono text-[10px] uppercase tracking-[0.02em]',
+        tone === 'red' && 'border-border-danger bg-surface-error text-content-error',
         className,
       )}
     >

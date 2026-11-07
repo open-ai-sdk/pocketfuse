@@ -1,9 +1,12 @@
 import {
+  AlarmClock,
   Bot,
   CircleDot,
   Database,
   GitBranch,
+  Globe,
   Layers,
+  MessageSquare,
   Rows3,
   Sparkles,
   Wrench,
@@ -35,6 +38,21 @@ export function kindFor(type?: string): ObservationKind {
       tone: 'neutral' as const,
     }
   )
+}
+
+// What a span means to a reader, where the server could tell.
+const KIND_BY_ROLE: Record<string, ObservationKind> = {
+  model_call: { label: 'Model call', icon: Sparkles, tone: 'violet' },
+  tool: { label: 'Tool', icon: Wrench, tone: 'amber' },
+  turn: { label: 'Turn', icon: MessageSquare, tone: 'blue' },
+  wake_turn: { label: 'Wake turn', icon: AlarmClock, tone: 'green' },
+  job: { label: 'Job', icon: Bot, tone: 'violet' },
+  run: { label: 'Run', icon: Layers, tone: 'blue' },
+  request: { label: 'Request', icon: Globe, tone: 'neutral' },
+}
+
+export function kindOf(observation: { role?: string; type?: string }): ObservationKind {
+  return KIND_BY_ROLE[observation.role ?? ''] ?? kindFor(observation.type)
 }
 
 // Icon chip (border + tinted surface + tone text) used by tree rows and

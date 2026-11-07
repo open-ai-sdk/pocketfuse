@@ -14,8 +14,9 @@ import { Route as DatasetsRouteImport } from './routes/datasets'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as PromptsRouteImport } from './routes/prompts'
 import { Route as ScoresRouteImport } from './routes/scores'
-import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SessionsIndexRouteImport } from './routes/sessions/index'
+import { Route as SessionsSessionIdRouteImport } from './routes/sessions/$sessionId'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as TracesTraceIdRouteImport } from './routes/traces/$traceId'
 
@@ -44,14 +45,19 @@ const ScoresRoute = ScoresRouteImport.update({
   path: '/scores',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SessionsRoute = SessionsRouteImport.update({
-  id: '/sessions',
-  path: '/sessions',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsIndexRoute = SessionsIndexRouteImport.update({
+  id: '/sessions/',
+  path: '/sessions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
+  id: '/sessions/$sessionId',
+  path: '/sessions/$sessionId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TracesIndexRoute = TracesIndexRouteImport.update({
@@ -71,9 +77,10 @@ export interface FileRoutesByFullPath {
   '/models': typeof ModelsRoute
   '/prompts': typeof PromptsRoute
   '/scores': typeof ScoresRoute
-  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/sessions/': typeof SessionsIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -82,9 +89,10 @@ export interface FileRoutesByTo {
   '/models': typeof ModelsRoute
   '/prompts': typeof PromptsRoute
   '/scores': typeof ScoresRoute
-  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/sessions': typeof SessionsIndexRoute
   '/traces': typeof TracesIndexRoute
 }
 export interface FileRoutesById {
@@ -94,9 +102,10 @@ export interface FileRoutesById {
   '/models': typeof ModelsRoute
   '/prompts': typeof PromptsRoute
   '/scores': typeof ScoresRoute
-  '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/sessions/$sessionId': typeof SessionsSessionIdRoute
   '/traces/$traceId': typeof TracesTraceIdRoute
+  '/sessions/': typeof SessionsIndexRoute
   '/traces/': typeof TracesIndexRoute
 }
 export interface FileRouteTypes {
@@ -107,9 +116,10 @@ export interface FileRouteTypes {
     | '/models'
     | '/prompts'
     | '/scores'
-    | '/sessions'
     | '/settings'
+    | '/sessions/$sessionId'
     | '/traces/$traceId'
+    | '/sessions/'
     | '/traces/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -118,9 +128,10 @@ export interface FileRouteTypes {
     | '/models'
     | '/prompts'
     | '/scores'
-    | '/sessions'
     | '/settings'
+    | '/sessions/$sessionId'
     | '/traces/$traceId'
+    | '/sessions'
     | '/traces'
   id:
     | '__root__'
@@ -129,9 +140,10 @@ export interface FileRouteTypes {
     | '/models'
     | '/prompts'
     | '/scores'
-    | '/sessions'
     | '/settings'
+    | '/sessions/$sessionId'
     | '/traces/$traceId'
+    | '/sessions/'
     | '/traces/'
   fileRoutesById: FileRoutesById
 }
@@ -141,9 +153,10 @@ export interface RootRouteChildren {
   ModelsRoute: typeof ModelsRoute
   PromptsRoute: typeof PromptsRoute
   ScoresRoute: typeof ScoresRoute
-  SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
+  SessionsSessionIdRoute: typeof SessionsSessionIdRoute
   TracesTraceIdRoute: typeof TracesTraceIdRoute
+  SessionsIndexRoute: typeof SessionsIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
 }
 
@@ -184,18 +197,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ScoresRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sessions': {
-      id: '/sessions'
-      path: '/sessions'
-      fullPath: '/sessions'
-      preLoaderRoute: typeof SessionsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions/': {
+      id: '/sessions/'
+      path: '/sessions'
+      fullPath: '/sessions/'
+      preLoaderRoute: typeof SessionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sessions/$sessionId': {
+      id: '/sessions/$sessionId'
+      path: '/sessions/$sessionId'
+      fullPath: '/sessions/$sessionId'
+      preLoaderRoute: typeof SessionsSessionIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/traces/': {
@@ -221,9 +241,10 @@ const rootRouteChildren: RootRouteChildren = {
   ModelsRoute: ModelsRoute,
   PromptsRoute: PromptsRoute,
   ScoresRoute: ScoresRoute,
-  SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
+  SessionsSessionIdRoute: SessionsSessionIdRoute,
   TracesTraceIdRoute: TracesTraceIdRoute,
+  SessionsIndexRoute: SessionsIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
 }
 export const routeTree = rootRouteImport

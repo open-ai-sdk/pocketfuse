@@ -11,6 +11,17 @@ export function formatDate(value?: string) {
     second: '2-digit',
   }).format(date)
 }
+export function formatClock(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
 export function formatRelative(value?: string) {
   if (!value) return '—'
   const date = new Date(value)
@@ -43,6 +54,18 @@ export function formatTokens(value?: number) {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(
     value,
   )
+}
+// Sum of the values that are known; undefined when none is, so an unreported
+// measure stays unknown instead of reading as zero.
+export function sumKnown<T>(items: T[], pick: (item: T) => number | undefined) {
+  const known = items.map(pick).filter((value): value is number => value !== undefined)
+  return known.length > 0 ? known.reduce((total, value) => total + value, 0) : undefined
+}
+// `130.8K in (124.3K cached) · 2.4K out`, or undefined when nothing was reported.
+export function formatUsage(usage?: { input?: number; cachedInput?: number; output?: number }) {
+  if (!usage || (usage.input === undefined && usage.output === undefined)) return undefined
+  const cached = usage.cachedInput ? ` (${formatTokens(usage.cachedInput)} cached)` : ''
+  return `${formatTokens(usage.input)} in${cached} · ${formatTokens(usage.output)} out`
 }
 export function prettyJson(value: unknown) {
   if (value === undefined || value === null) return ''
